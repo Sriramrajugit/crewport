@@ -1,0 +1,467 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Company {
+  id                Int              @id @default(autoincrement())
+  company_name      String           @unique @db.VarChar(150)
+  company_code      String           @unique @db.VarChar(50)
+  contact_email     String?          @db.VarChar(150)
+  contact_phone     String?          @db.VarChar(20)
+  address           String?
+  city              String?          @db.VarChar(100)
+  country           String?          @db.VarChar(100)
+  subscription_plan String?          @db.VarChar(50)
+  is_active         Boolean?         @default(true)
+  created_at        DateTime?        @default(now()) @db.Timestamp(6)
+  updated_at        DateTime?        @default(now()) @db.Timestamp(6)
+  crew_members      CrewMember[]
+  exchange_rates    exchange_rates[]
+  purchases         purchases[]
+  users             User[]
+  vessels           Vessel[]
+  ranks             Rank[]
+  slopchest_items   SlopchestItem[]
+
+  @@index([company_code], map: "idx_companies_code")
+  @@index([is_active], map: "idx_companies_is_active")
+  @@map("companies")
+}
+
+model User {
+  id                                                     Int              @id @default(autoincrement())
+  company_id                                             Int
+  user_id                                                String           @db.VarChar(100)
+  email                                                  String           @db.VarChar(150)
+  password_hash                                          String
+  full_name                                              String?          @db.VarChar(100)
+  role_id                                                Int
+  vessel_id                                              Int?
+  is_active                                              Boolean?         @default(true)
+  last_login                                             DateTime?        @db.Timestamp(6)
+  login_attempts                                         Int?             @default(0)
+  failed_login_timestamp                                 DateTime?        @db.Timestamp(6)
+  created_by                                             Int?
+  created_at                                             DateTime?        @default(now()) @db.Timestamp(6)
+  updated_at                                             DateTime?        @default(now()) @db.Timestamp(6)
+  deleted_at                                             DateTime?        @db.Timestamp(6)
+  activity_log                                           activity_log[]
+  crew_members_crew_members_created_byTousers            CrewMember[]     @relation("crew_members_created_byTousers")
+  crew_members_crew_members_documents_verified_byTousers CrewMember[]     @relation("crew_members_documents_verified_byTousers")
+  crew_members_crew_members_user_idTousers               CrewMember[]     @relation("crew_members_user_idTousers")
+  exchange_rates                                         exchange_rates[]
+  password_reset                                         password_reset[]
+  purchases_purchases_approved_byTousers                 purchases[]      @relation("purchases_approved_byTousers")
+  purchases_purchases_created_byTousers                  purchases[]      @relation("purchases_created_byTousers")
+  user_sessions                                          UserSession[]
+  user_vessels                                           user_vessels[]
+  slopchest_consumptions                                 SlopchestConsumption[]
+  slopchest_on_signers                                   SlopchestOnSigner[]
+  companies                                              Company          @relation(fields: [company_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                                                  User?            @relation("usersTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  other_users                                            User[]           @relation("usersTousers")
+  users_roles                                            users_roles      @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  vessels                                                Vessel?          @relation(fields: [vessel_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([company_id, email])
+  @@unique([company_id, user_id])
+  @@index([company_id], map: "idx_users_company_id")
+  @@index([company_id, email], map: "idx_users_email")
+  @@index([is_active], map: "idx_users_is_active")
+  @@index([role_id], map: "idx_users_role_id")
+  @@index([company_id, user_id], map: "idx_users_user_id")
+  @@index([vessel_id], map: "idx_users_vessel_id")
+  @@map("users")
+}
+
+model Vessel {
+  id                          Int          @id @default(autoincrement())
+  company_id                  Int
+  vessel_name                 String       @db.VarChar(150)
+  imo_number                  String?      @db.VarChar(50)
+  mmsi_number                 String?      @db.VarChar(50)
+  vessel_type                 String?      @db.VarChar(100)
+  flag_state                  String?      @db.VarChar(100)
+  owner_company               String?      @db.VarChar(150)
+  length                      Decimal?     @db.Decimal(10, 2)
+  beam                        Decimal?     @db.Decimal(10, 2)
+  draft                       Decimal?     @db.Decimal(10, 2)
+  gross_tonnage               Decimal?     @db.Decimal(12, 2)
+  net_tonnage                 Decimal?     @db.Decimal(12, 2)
+  deadweight_tonnage          Decimal?     @db.Decimal(12, 2)
+  year_built                  Int?
+  engine_power                Decimal?     @db.Decimal(10, 2)
+  status                      String?      @default("ACTIVE") @db.VarChar(50)
+  created_at                  DateTime?    @default(now()) @db.Timestamp(6)
+  updated_at                  DateTime?    @default(now()) @db.Timestamp(6)
+  crew_members                CrewMember[]
+  purchases                   purchases[]
+  users                       User[]
+  user_vessels                user_vessels[]
+  slopchest_consumptions      SlopchestConsumption[]
+  slopchest_on_signers        SlopchestOnSigner[]
+  companies                   Company      @relation(fields: [company_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([company_id, imo_number])
+  @@index([company_id], map: "idx_vessels_company_id")
+  @@map("vessels")
+}
+
+model CrewMember {
+  id                                              Int       @id @default(autoincrement())
+  company_id                                      Int
+  vessel_id                                       Int
+  user_id                                         Int?
+  name                                            String    @db.VarChar(150)
+  rank                                            String?   @db.VarChar(100)
+  position                                        String?   @db.VarChar(100)
+  date_of_birth                                   DateTime? @db.Date
+  passport_number                                 String?   @db.VarChar(50)
+  nationality                                     String?   @db.VarChar(100)
+  contact_number                                  String?   @db.VarChar(20)
+  emergency_contact                               String?   @db.VarChar(150)
+  emergency_contact_number                        String?   @db.VarChar(20)
+  sign_on_date                                    DateTime? @db.Date
+  sign_off_date                                   DateTime? @db.Date
+  sign_on_port                                    String?   @db.VarChar(100)
+  sign_off_port                                   String?   @db.VarChar(100)
+  exit_type                                       String?   @db.VarChar(50)
+  exit_remarks                                    String?
+  contract_file                                   String?
+  contract_completed                              Boolean?  @default(false)
+  not_completed_reason                            String?
+  medical_sign_off                                Boolean?  @default(false)
+  medical_reason                                  String?
+  certificate_expiry                              DateTime? @db.Date
+  identification_document                         String?
+  onboarding_status                               String?   @default("PENDING") @db.VarChar(50)
+  crew_status                                     String?   @default("NEW") @db.VarChar(50)
+  documents_verified_by                           Int?
+  verified_at                                     DateTime? @db.Timestamp(6)
+  created_by                                      Int
+  created_at                                      DateTime? @default(now()) @db.Timestamp(6)
+  updated_at                                      DateTime? @default(now()) @db.Timestamp(6)
+  deleted_at                                      DateTime? @db.Timestamp(6)
+  basic_salary                                    Decimal?  @db.Decimal(15, 2)
+  fixed_overtime                                  Decimal?  @db.Decimal(15, 2)
+  leave_wages                                     Decimal?  @db.Decimal(15, 2)
+  other_allowances                                Decimal?  @db.Decimal(15, 2)
+  travel_wages                                    Decimal?  @db.Decimal(15, 2)
+  hra                                             Decimal?  @db.Decimal(15, 2)
+  joining_expenses                                Decimal?  @db.Decimal(15, 2)
+  onboard_allowance_short_manning                 Decimal?  @db.Decimal(15, 2)
+  total_earnings                                  Decimal?  @db.Decimal(15, 2)
+  companies                                       Company   @relation(fields: [company_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_crew_members_created_byTousers            User      @relation("crew_members_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_crew_members_documents_verified_byTousers User?     @relation("crew_members_documents_verified_byTousers", fields: [documents_verified_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_crew_members_user_idTousers               User?     @relation("crew_members_user_idTousers", fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  vessels                                         Vessel    @relation(fields: [vessel_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  crew_earnings                                   CrewEarnings[]
+  slopchest_consumptions                          SlopchestConsumption[]
+
+  @@index([company_id], map: "idx_crew_company_id")
+  @@index([onboarding_status], map: "idx_crew_onboarding_status")
+  @@index([sign_on_date], map: "idx_crew_sign_on_date")
+  @@index([user_id], map: "idx_crew_user_id")
+  @@index([vessel_id], map: "idx_crew_vessel_id")
+  @@map("crew_members")
+}
+
+model CrewEarnings {
+  id                                Int       @id @default(autoincrement())
+  crew_member_id                    Int
+  month                             Int       @db.Integer
+  year                              Int       @db.Integer
+  basic_salary                      Decimal?  @db.Decimal(15, 2)
+  fixed_overtime                    Decimal?  @db.Decimal(15, 2)
+  leave_wages                       Decimal?  @db.Decimal(15, 2)
+  other_allowances                  Decimal?  @db.Decimal(15, 2)
+  travel_wages                      Decimal?  @db.Decimal(15, 2)
+  hra                               Decimal?  @db.Decimal(15, 2)
+  joining_expenses                  Decimal?  @db.Decimal(15, 2)
+  onboard_allowance_short_manning   Decimal?  @db.Decimal(15, 2)
+  total_earnings                    Decimal?  @db.Decimal(15, 2)
+  cash_drawn                        Decimal?  @db.Decimal(15, 2)
+  home_allowance                    Decimal?  @db.Decimal(15, 2)
+  bond_deduction                    Decimal?  @db.Decimal(15, 2)
+  other_deduction                   Decimal?  @db.Decimal(15, 2)
+  brought_forward                   Decimal?  @db.Decimal(15, 2)
+  created_at                        DateTime? @default(now()) @db.Timestamp(6)
+  updated_at                        DateTime? @default(now()) @db.Timestamp(6)
+  crew_members                      CrewMember @relation(fields: [crew_member_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([crew_member_id, month, year])
+  @@index([crew_member_id], map: "idx_crew_earnings_crew_id")
+  @@index([month, year], map: "idx_crew_earnings_month_year")
+  @@map("crew_earnings")
+}
+
+model UserSession {
+  id            Int       @id @default(autoincrement())
+  user_id       Int
+  session_token String    @db.VarChar(500)
+  refresh_token String?   @db.VarChar(500)
+  ip_address    String?   @db.VarChar(45)
+  user_agent    String?
+  login_at      DateTime? @default(now()) @db.Timestamp(6)
+  expires_at    DateTime  @db.Timestamp(6)
+  is_active     Boolean?  @default(true)
+  logout_at     DateTime? @db.Timestamp(6)
+  users         User      @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([is_active], map: "idx_user_sessions_is_active")
+  @@index([session_token], map: "idx_user_sessions_token")
+  @@index([user_id], map: "idx_user_sessions_user_id")
+  @@map("user_sessions")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model activity_log {
+  id          Int       @id @default(autoincrement())
+  user_id     Int
+  action      String    @db.VarChar(100)
+  module      String?   @db.VarChar(50)
+  description String?
+  entity_id   Int?
+  entity_type String?   @db.VarChar(50)
+  old_values  Json?
+  new_values  Json?
+  ip_address  String?   @db.VarChar(45)
+  status      String?   @default("SUCCESS") @db.VarChar(20)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  users       User      @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([created_at], map: "idx_activity_log_created_at")
+  @@index([entity_type, entity_id], map: "idx_activity_log_entity")
+  @@index([user_id], map: "idx_activity_log_user_id")
+}
+
+model Rank {
+  id          Int          @id @default(autoincrement())
+  company_id  Int?
+  rank_name   String       @db.VarChar(100)
+  rank_code   String       @db.VarChar(20)
+  description String?
+  is_active   Boolean?     @default(true)
+  created_at  DateTime?    @default(now()) @db.Timestamp(6)
+  updated_at  DateTime?    @default(now()) @db.Timestamp(6)
+  companies   Company?     @relation(fields: [company_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([rank_code, company_id])
+  @@index([company_id], map: "idx_rank_company_id")
+  @@index([is_active], map: "idx_rank_is_active")
+  @@map("ranks")
+}
+
+model Port {
+  id          Int          @id @default(autoincrement())
+  port_name   String       @db.VarChar(100)
+  port_code   String       @unique @db.VarChar(20)
+  country     String?      @db.VarChar(100)
+  is_active   Boolean?     @default(true)
+  created_at  DateTime?    @default(now()) @db.Timestamp(6)
+  updated_at  DateTime?    @default(now()) @db.Timestamp(6)
+
+  @@index([is_active], map: "idx_port_is_active")
+  @@map("ports")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model exchange_rates {
+  id                  Int       @id @default(autoincrement())
+  company_id          Int
+  usd_to_local        Decimal   @db.Decimal(12, 4)
+  local_currency_code String?   @default("INR") @db.VarChar(3)
+  effective_from      DateTime  @db.Date
+  effective_to        DateTime? @db.Date
+  created_by          Int
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  updated_at          DateTime? @default(now()) @db.Timestamp(6)
+  is_active           Boolean?  @default(true)
+  companies           Company   @relation(fields: [company_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users               User      @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([company_id], map: "idx_exchange_rates_company_id")
+  @@index([company_id, effective_from], map: "idx_exchange_rates_effective_from")
+  @@index([company_id, is_active], map: "idx_exchange_rates_is_active")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model password_reset {
+  id               Int       @id @default(autoincrement())
+  user_id          Int
+  reset_token      String    @unique @db.VarChar(500)
+  token_expires_at DateTime  @db.Timestamp(6)
+  is_used          Boolean?  @default(false)
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+  completed_at     DateTime? @db.Timestamp(6)
+  users            User      @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([reset_token], map: "idx_password_reset_reset_token")
+  @@index([user_id], map: "idx_password_reset_user_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model purchases {
+  id                                 Int       @id @default(autoincrement())
+  company_id                         Int
+  vessel_id                          Int
+  type                               String    @db.VarChar(50)
+  log_period                         String?   @db.VarChar(50)
+  rfq_no                             String?   @db.VarChar(100)
+  po_no                              String?   @db.VarChar(100)
+  invoice_file                       String?
+  dn_file                            String?
+  base_amount_usd                    Decimal   @db.Decimal(14, 2)
+  exchange_rate                      Decimal   @db.Decimal(12, 4)
+  total_local                        Decimal?  @db.Decimal(14, 2)
+  created_by                         Int
+  approval_status                    String?   @default("PENDING") @db.VarChar(50)
+  approved_by                        Int?
+  approved_at                        DateTime? @db.Timestamp(6)
+  created_at                         DateTime? @default(now()) @db.Timestamp(6)
+  updated_at                         DateTime? @default(now()) @db.Timestamp(6)
+  deleted_at                         DateTime? @db.Timestamp(6)
+  users_purchases_approved_byTousers User?     @relation("purchases_approved_byTousers", fields: [approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  companies                          Company   @relation(fields: [company_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_purchases_created_byTousers  User      @relation("purchases_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  vessels                            Vessel    @relation(fields: [vessel_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([approval_status], map: "idx_purchases_approval_status")
+  @@index([company_id], map: "idx_purchases_company_id")
+  @@index([created_by], map: "idx_purchases_created_by")
+  @@index([type], map: "idx_purchases_type")
+  @@index([vessel_id], map: "idx_purchases_vessel_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model user_permissions {
+  id             Int         @id @default(autoincrement())
+  role_id        Int
+  permission_key String      @db.VarChar(100)
+  description    String?
+  screen_access  Boolean?    @default(true)
+  can_create     Boolean?    @default(false)
+  can_read       Boolean?    @default(false)
+  can_update     Boolean?    @default(false)
+  can_delete     Boolean?    @default(false)
+  created_at     DateTime?   @default(now()) @db.Timestamp(6)
+  updated_at     DateTime?   @default(now()) @db.Timestamp(6)
+  users_roles    users_roles @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([role_id, permission_key])
+  @@index([permission_key], map: "idx_user_permissions_permission_key")
+  @@index([role_id], map: "idx_user_permissions_role_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model users_roles {
+  id               Int                @id @default(autoincrement())
+  role_name        String             @unique @db.VarChar(50)
+  description      String?
+  permissions      Json?              @default("[]")
+  created_at       DateTime?          @default(now()) @db.Timestamp(6)
+  updated_at       DateTime?          @default(now()) @db.Timestamp(6)
+  user_permissions user_permissions[]
+  users            User[]
+}
+/// User to Vessel Mapping (N:M relationship)
+/// Allows one user to access multiple vessels across companies
+model user_vessels {
+  id              Int       @id @default(autoincrement())
+  user_id         Int
+  vessel_id       Int
+  role_on_vessel  String?   @default("VESSEL_USER") @db.VarChar(50)
+  is_active       Boolean?  @default(true)
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+  users           User      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vessels         Vessel    @relation(fields: [vessel_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([user_id, vessel_id])
+  @@index([user_id], map: "idx_user_vessels_user_id")
+  @@index([vessel_id], map: "idx_user_vessels_vessel_id")
+  @@index([is_active], map: "idx_user_vessels_is_active")
+  @@map("user_vessels")
+}
+
+// Slopchest Management
+model SlopchestItem {
+  id                Int                        @id @default(autoincrement())
+  company_id        Int
+  item_name         String                     @db.VarChar(150)
+  item_code         String                     @db.VarChar(50)
+  unit_price        Decimal                    @db.Decimal(10, 2)
+  unit              String                     @default("units") @db.VarChar(50)
+  category          String?                    @db.VarChar(100)
+  is_active         Boolean                    @default(true)
+  created_at        DateTime?                  @default(now()) @db.Timestamp(6)
+  updated_at        DateTime?                  @default(now()) @db.Timestamp(6)
+  companies         Company                    @relation(fields: [company_id], references: [id])
+  slopchest_consumptions SlopchestConsumption[]
+  slopchest_on_signers   SlopchestOnSigner[]
+
+  @@unique([company_id, item_code])
+  @@index([company_id], map: "idx_slopchest_item_company")
+  @@index([is_active], map: "idx_slopchest_item_active")
+  @@map("slopchest_items")
+}
+
+model SlopchestConsumption {
+  id                Int           @id @default(autoincrement())
+  vessel_id         Int
+  crew_member_id    Int?
+  item_id           Int
+  consumption_date  DateTime      @db.Date
+  month             Int           @db.Integer
+  year              Int           @db.Integer
+  quantity          Decimal       @db.Decimal(10, 2)
+  unit_price        Decimal       @db.Decimal(10, 2)
+  total_deduction   Decimal       @db.Decimal(15, 2)
+  notes             String?       @db.VarChar(500)
+  created_by        Int
+  created_at        DateTime      @default(now()) @db.Timestamp(6)
+  updated_at        DateTime?     @default(now()) @db.Timestamp(6)
+  vessels           Vessel        @relation(fields: [vessel_id], references: [id])
+  crew_members      CrewMember?   @relation(fields: [crew_member_id], references: [id], onDelete: SetNull)
+  slopchest_items   SlopchestItem @relation(fields: [item_id], references: [id])
+  users             User          @relation(fields: [created_by], references: [id])
+
+  @@unique([vessel_id, crew_member_id, item_id, month, year])
+  @@index([vessel_id], map: "idx_slopchest_consumption_vessel")
+  @@index([crew_member_id], map: "idx_slopchest_consumption_crew")
+  @@index([month, year], map: "idx_slopchest_consumption_month_year")
+  @@map("slopchest_consumptions")
+}
+
+model SlopchestOnSigner {
+  id              Int           @id @default(autoincrement())
+  vessel_id       Int
+  item_id         Int
+  signer_name     String        @db.VarChar(150)
+  consumption_date  DateTime    @db.Date
+  month           Int           @db.Integer
+  year            Int           @db.Integer
+  quantity        Decimal       @db.Decimal(10, 2)
+  unit_price      Decimal       @db.Decimal(10, 2)
+  total_deduction Decimal       @db.Decimal(15, 2)
+  remarks         String?       @db.VarChar(500)
+  created_by      Int
+  created_at      DateTime      @default(now()) @db.Timestamp(6)
+  updated_at      DateTime?     @default(now()) @db.Timestamp(6)
+  vessels         Vessel        @relation(fields: [vessel_id], references: [id])
+  slopchest_items SlopchestItem @relation(fields: [item_id], references: [id])
+  users           User          @relation(fields: [created_by], references: [id])
+
+  @@index([vessel_id], map: "idx_slopchest_onsigner_vessel")
+  @@index([month, year], map: "idx_slopchest_onsigner_month_year")
+  @@map("slopchest_on_signers")
+}

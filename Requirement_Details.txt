@@ -1,0 +1,119 @@
+VESSEL CREW & FINANCE MANAGEMENT SYSTEM
+Technical Requirement Specification
+Tech Stack: React | Node.js | Express | PostgreSQL | JWT Authentication
+
+1. System Overview
+This is a web-based application designed for vessel-side and office-side operations. The system supports two types of users: ADMIN (Office) and VESSEL users.
+Admin Responsibilities:
+Manage exchange rates (USD base)
+Approve additional earnings
+Manage master data
+Vessel Responsibilities:
+Crew management
+Purchases (Provision & Bond)
+Earnings and deductions management
+Inventory and reporting
+2. Core Modules
+Authentication
+Crew Management
+Additional Staff Management
+CTM Request Management
+Provision Purchase
+Bond Purchase
+Earnings & Deductions
+Victualling Inventory
+Bonded Stores Consumption
+Welfare Account
+Reports Module
+Exchange Rate Management
+3. Database Design (PostgreSQL)
+Users Table
+
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100),
+    email VARCHAR(150) UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role VARCHAR(50) CHECK (role IN ('ADMIN','VESSEL')),
+    vessel_id INT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+Vessels Table
+
+CREATE TABLE vessels (
+    id SERIAL PRIMARY KEY,
+    vessel_name VARCHAR(150),
+    imo_number VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+Exchange Rates Table
+
+CREATE TABLE exchange_rates (
+    id SERIAL PRIMARY KEY,
+    usd_to_local NUMERIC(12,4) NOT NULL,
+    effective_from DATE NOT NULL,
+    created_by INT REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+Crew Table
+
+CREATE TABLE crew (
+    id SERIAL PRIMARY KEY,
+    vessel_id INT REFERENCES vessels(id),
+    name VARCHAR(150),
+    rank VARCHAR(100),
+    sign_on_date DATE,
+    sign_off_date DATE,
+    sign_on_port VARCHAR(100),
+    sign_off_port VARCHAR(100),
+    contract_file TEXT,
+    contract_completed BOOLEAN,
+    not_completed_reason TEXT,
+    medical_sign_off BOOLEAN,
+    medical_reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+Purchases Table
+
+CREATE TABLE purchases (
+    id SERIAL PRIMARY KEY,
+    vessel_id INT REFERENCES vessels(id),
+    type VARCHAR(50) CHECK (type IN ('PROVISION','BOND')),
+    log_period VARCHAR(50),
+    rfq_no VARCHAR(100),
+    po_no VARCHAR(100),
+    invoice_file TEXT,
+    dn_file TEXT,
+    base_amount_usd NUMERIC(14,2),
+    exchange_rate NUMERIC(12,4),
+    total_local NUMERIC(14,2),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+4. Business Rules
+Exchange rate managed only by ADMIN.
+Latest effective exchange rate is used for USD conversion.
+Total Local Amount = base_amount_usd * exchange_rate.
+Earnings auto-populated from contract details.
+Additional earnings require ADMIN approval.
+Victualling consumption = opening_qty + purchase_qty - closing_qty.
+Transportation cost excluded from item cost calculation.
+5. API Structure (Node.js + Express)
+POST /api/auth/login
+POST /api/auth/register
+GET /api/crew
+POST /api/crew
+PUT /api/crew/:id
+POST /api/purchases
+GET /api/purchases?type=PROVISION
+GET /api/exchange-rate/latest
+POST /api/exchange-rate (ADMIN only)
+GET /api/reports/portage?month=YYYY-MM
+6. Role Permissions
+ADMIN: Manage exchange rate, approve earnings, view all reports.
+VESSEL: Manage crew, upload invoices, manage earnings/deductions, generate reports.
