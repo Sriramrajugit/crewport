@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
                 return null;
             };
 
-            const errors = [];
+            const errors: string[] = [];
             const cashError = validateDeduction(cash_drawn || 0, 'Cash Drawn');
             if (cashError) errors.push(cashError);
             

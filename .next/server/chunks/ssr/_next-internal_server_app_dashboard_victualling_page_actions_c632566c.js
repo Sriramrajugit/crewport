@@ -1,0 +1,3 @@
+module.exports=[46378,a=>{"use strict";a.s([])}];
+
+//# sourceMappingURL=_next-internal_server_app_dashboard_victualling_page_actions_c632566c.js.map

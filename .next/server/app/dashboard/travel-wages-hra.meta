@@ -1,0 +1,16 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/dashboard/layout,_N_T_/dashboard/travel-wages-hra/layout,_N_T_/dashboard/travel-wages-hra/page,_N_T_/dashboard/travel-wages-hra"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/dashboard/travel-wages-hra/__PAGE__",
+    "/dashboard/travel-wages-hra",
+    "/dashboard",
+    "/_index",
+    "/_head"
+  ]
+}

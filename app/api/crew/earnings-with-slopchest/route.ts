@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
 
             // Filter for SLOPCHEST only (application-layer filtering is more reliable)
             const inventoryConsumptions = allConsumptions.filter(
-                (c) => c.inventory_items?.inventory_type === 'SLOPCHEST'
+                (c: typeof allConsumptions[0]) => c.inventory_items?.inventory_type === 'SLOPCHEST'
             );
 
             // Map crew with earnings and inventory deductions

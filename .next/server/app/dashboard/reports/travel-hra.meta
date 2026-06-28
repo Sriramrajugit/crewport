@@ -1,0 +1,17 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/dashboard/layout,_N_T_/dashboard/reports/layout,_N_T_/dashboard/reports/travel-hra/layout,_N_T_/dashboard/reports/travel-hra/page,_N_T_/dashboard/reports/travel-hra"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/dashboard/reports/travel-hra/__PAGE__",
+    "/dashboard/reports/travel-hra",
+    "/dashboard/reports",
+    "/dashboard",
+    "/_index",
+    "/_head"
+  ]
+}

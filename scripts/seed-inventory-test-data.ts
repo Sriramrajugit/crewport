@@ -85,7 +85,7 @@ async function seedTestData() {
     console.log(`\n📅 Creating consumption records for ${currentMonth}/${currentYear}...\n`);
 
     // Create consumption records
-    const consumptionRecords = [];
+    const consumptionRecords: any[] = [];
     for (let i = 0; i < crew.length; i++) {
       for (let j = 0; j < 2; j++) {
         const item = items[j % items.length];

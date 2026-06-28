@@ -1,0 +1,16 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/dashboard/layout,_N_T_/dashboard/victualling/layout,_N_T_/dashboard/victualling/page,_N_T_/dashboard/victualling"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/dashboard/victualling/__PAGE__",
+    "/dashboard/victualling",
+    "/dashboard",
+    "/_index",
+    "/_head"
+  ]
+}

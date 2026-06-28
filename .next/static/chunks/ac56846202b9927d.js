@@ -1,0 +1,1 @@
+(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,72984,t=>{"use strict";function e(t){let e="string"==typeof t?new Date(t):t,r=String(e.getDate()).padStart(2,"0"),a=String(e.getMonth()+1).padStart(2,"0"),n=e.getFullYear();return`${r}/${a}/${n}`}t.s(["formatDateDDMMYYYY",()=>e])}]);

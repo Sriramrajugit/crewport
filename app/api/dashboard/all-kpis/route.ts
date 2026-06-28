@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
                     }
                 });
 
-                const crewIds = crewMembers.map(c => c.id);
+                const crewIds = crewMembers.map((c: typeof crewMembers[0]) => c.id);
 
                 // Now fetch all KPI metrics
                 const [
@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
                 ] = await Promise.all([
                     // Count pending crew from already fetched data
                     Promise.resolve(
-                        crewMembers.filter(c => c.onboarding_status?.toUpperCase() === 'PENDING').length
+                        crewMembers.filter((c: typeof crewMembers[0]) => c.onboarding_status?.toUpperCase() === 'PENDING').length
                     ),
                     // Count crew signed on this month
                     prisma.crewMember.count({

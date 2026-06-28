@@ -86,8 +86,8 @@ export async function POST(request: NextRequest) {
             }
 
             // Handle file uploads
-            let invoiceFilePath = null;
-            let dnFilePath = null;
+            let invoiceFilePath: string | null = null;
+            let dnFilePath: string | null = null;
 
             const uploadsDir = join(process.cwd(), 'public/uploads/purchases');
             

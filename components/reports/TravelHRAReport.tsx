@@ -96,7 +96,7 @@ const TravelHRAReport = forwardRef<{ handleExportExcel: () => void }, Props>(
                     });
 
                     // Create worksheet
-                    const worksheet = XLSX.utils.json_to_sheet(exportData, { header: 1 });
+                    const worksheet = XLSX.utils.json_to_sheet(exportData);
                     
                     // Set column widths
                     const colWidths = [
@@ -110,14 +110,7 @@ const TravelHRAReport = forwardRef<{ handleExportExcel: () => void }, Props>(
                     ];
                     worksheet['!cols'] = colWidths;
 
-                    // Add data
-                    const headers = ['Type', 'Employee Name', 'Rank', 'Start Date', 'End Date', 'No. of Days', 'Amount'];
-                    const sheetData = [headers, ...exportData];
-                    
-                    const ws = XLSX.utils.aoa_to_sheet(sheetData);
-                    ws['!cols'] = colWidths;
-
-                    XLSX.utils.book_append_sheet(workbook, ws, 'Travel & HRA');
+                    XLSX.utils.book_append_sheet(workbook, worksheet, 'Travel & HRA');
 
                     // Generate filename with month/year
                     const monthName = new Date(year, month - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });

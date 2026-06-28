@@ -5,12 +5,13 @@
     "private": true,
     "scripts": {
         "dev": "next dev -H 0.0.0.0",
-        "build": "next build",
+        "build": "npm run build:ocr && next build",
+        "build:ocr": "cd modules/ocr-extractor && npm run build && cd ../..",
         "start": "next start",
         "lint": "eslint",
         "clean": "rimraf .next node_modules/.cache",
         "clean:all": "rimraf .next node_modules",
-        "postinstall": "prisma generate"
+        "postinstall": "npm run build:ocr && prisma generate"
     },
     "prisma": {
         "seed": "node --loader ts-node/esm prisma/seed.ts"

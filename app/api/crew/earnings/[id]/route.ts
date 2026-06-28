@@ -39,7 +39,7 @@ export async function PUT(
                 return null;
             };
 
-            const errors = [];
+            const errors: string[] = [];
             if (cash_drawn !== undefined) {
                 const error = validateNumericField(cash_drawn, 'Cash Drawn');
                 if (error) errors.push(error);

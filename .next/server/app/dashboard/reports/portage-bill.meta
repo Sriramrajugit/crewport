@@ -1,0 +1,17 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/dashboard/layout,_N_T_/dashboard/reports/layout,_N_T_/dashboard/reports/portage-bill/layout,_N_T_/dashboard/reports/portage-bill/page,_N_T_/dashboard/reports/portage-bill"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/dashboard/reports/portage-bill/__PAGE__",
+    "/dashboard/reports/portage-bill",
+    "/dashboard/reports",
+    "/dashboard",
+    "/_index",
+    "/_head"
+  ]
+}

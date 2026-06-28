@@ -1,0 +1,397 @@
+{
+  "version": 3,
+  "pages404": true,
+  "appType": "app",
+  "caseSensitive": false,
+  "basePath": "",
+  "redirects": [
+    {
+      "source": "/:path+/",
+      "destination": "/:path+",
+      "internal": true,
+      "priority": true,
+      "statusCode": 308,
+      "regex": "^(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))/$"
+    }
+  ],
+  "headers": [],
+  "rewrites": {
+    "beforeFiles": [],
+    "afterFiles": [],
+    "fallback": []
+  },
+  "dynamicRoutes": [
+    {
+      "page": "/api/crew/earnings/[id]",
+      "regex": "^/api/crew/earnings/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/crew/earnings/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/crew/[id]",
+      "regex": "^/api/crew/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/crew/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/users/[id]",
+      "regex": "^/api/users/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/users/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/vessels/[id]",
+      "regex": "^/api/vessels/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/vessels/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/vessels/[id]/certificates",
+      "regex": "^/api/vessels/([^/]+?)/certificates(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/vessels/(?<nxtPid>[^/]+?)/certificates(?:/)?$"
+    }
+  ],
+  "staticRoutes": [
+    {
+      "page": "/",
+      "regex": "^/(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/(?:/)?$"
+    },
+    {
+      "page": "/_global-error",
+      "regex": "^/_global\\-error(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_global\\-error(?:/)?$"
+    },
+    {
+      "page": "/_not-found",
+      "regex": "^/_not\\-found(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_not\\-found(?:/)?$"
+    },
+    {
+      "page": "/api/auth/login",
+      "regex": "^/api/auth/login(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/auth/login(?:/)?$"
+    },
+    {
+      "page": "/api/auth/logout",
+      "regex": "^/api/auth/logout(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/auth/logout(?:/)?$"
+    },
+    {
+      "page": "/api/auth/me",
+      "regex": "^/api/auth/me(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/auth/me(?:/)?$"
+    },
+    {
+      "page": "/api/crew",
+      "regex": "^/api/crew(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/crew(?:/)?$"
+    },
+    {
+      "page": "/api/crew/earnings",
+      "regex": "^/api/crew/earnings(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/crew/earnings(?:/)?$"
+    },
+    {
+      "page": "/api/crew/earnings-with-slopchest",
+      "regex": "^/api/crew/earnings\\-with\\-slopchest(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/crew/earnings\\-with\\-slopchest(?:/)?$"
+    },
+    {
+      "page": "/api/dashboard/all-kpis",
+      "regex": "^/api/dashboard/all\\-kpis(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/dashboard/all\\-kpis(?:/)?$"
+    },
+    {
+      "page": "/api/dashboard/kpis",
+      "regex": "^/api/dashboard/kpis(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/dashboard/kpis(?:/)?$"
+    },
+    {
+      "page": "/api/dashboard/victualling/consolidated",
+      "regex": "^/api/dashboard/victualling/consolidated(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/dashboard/victualling/consolidated(?:/)?$"
+    },
+    {
+      "page": "/api/dashboard/victualling/manday",
+      "regex": "^/api/dashboard/victualling/manday(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/dashboard/victualling/manday(?:/)?$"
+    },
+    {
+      "page": "/api/dashboard/victualling/outport",
+      "regex": "^/api/dashboard/victualling/outport(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/dashboard/victualling/outport(?:/)?$"
+    },
+    {
+      "page": "/api/dashboard/victualling-consumption",
+      "regex": "^/api/dashboard/victualling\\-consumption(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/dashboard/victualling\\-consumption(?:/)?$"
+    },
+    {
+      "page": "/api/hra",
+      "regex": "^/api/hra(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/hra(?:/)?$"
+    },
+    {
+      "page": "/api/masters/companies",
+      "regex": "^/api/masters/companies(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/masters/companies(?:/)?$"
+    },
+    {
+      "page": "/api/masters/exchange",
+      "regex": "^/api/masters/exchange(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/masters/exchange(?:/)?$"
+    },
+    {
+      "page": "/api/masters/ports",
+      "regex": "^/api/masters/ports(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/masters/ports(?:/)?$"
+    },
+    {
+      "page": "/api/masters/ranks",
+      "regex": "^/api/masters/ranks(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/masters/ranks(?:/)?$"
+    },
+    {
+      "page": "/api/masters/roles",
+      "regex": "^/api/masters/roles(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/masters/roles(?:/)?$"
+    },
+    {
+      "page": "/api/masters/vessels",
+      "regex": "^/api/masters/vessels(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/masters/vessels(?:/)?$"
+    },
+    {
+      "page": "/api/purchases",
+      "regex": "^/api/purchases(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/purchases(?:/)?$"
+    },
+    {
+      "page": "/api/reports/hra",
+      "regex": "^/api/reports/hra(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/reports/hra(?:/)?$"
+    },
+    {
+      "page": "/api/reports/travel-hra",
+      "regex": "^/api/reports/travel\\-hra(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/reports/travel\\-hra(?:/)?$"
+    },
+    {
+      "page": "/api/reports/travel-wages",
+      "regex": "^/api/reports/travel\\-wages(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/reports/travel\\-wages(?:/)?$"
+    },
+    {
+      "page": "/api/slopchest/consumption",
+      "regex": "^/api/slopchest/consumption(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/slopchest/consumption(?:/)?$"
+    },
+    {
+      "page": "/api/slopchest/items",
+      "regex": "^/api/slopchest/items(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/slopchest/items(?:/)?$"
+    },
+    {
+      "page": "/api/slopchest/on-signers",
+      "regex": "^/api/slopchest/on\\-signers(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/slopchest/on\\-signers(?:/)?$"
+    },
+    {
+      "page": "/api/slopchest/summary",
+      "regex": "^/api/slopchest/summary(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/slopchest/summary(?:/)?$"
+    },
+    {
+      "page": "/api/travel-wages",
+      "regex": "^/api/travel\\-wages(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/travel\\-wages(?:/)?$"
+    },
+    {
+      "page": "/api/upload",
+      "regex": "^/api/upload(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/upload(?:/)?$"
+    },
+    {
+      "page": "/api/users",
+      "regex": "^/api/users(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/users(?:/)?$"
+    },
+    {
+      "page": "/api/vessels",
+      "regex": "^/api/vessels(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/vessels(?:/)?$"
+    },
+    {
+      "page": "/dashboard",
+      "regex": "^/dashboard(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard(?:/)?$"
+    },
+    {
+      "page": "/dashboard/bond",
+      "regex": "^/dashboard/bond(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/bond(?:/)?$"
+    },
+    {
+      "page": "/dashboard/crew",
+      "regex": "^/dashboard/crew(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/crew(?:/)?$"
+    },
+    {
+      "page": "/dashboard/crew/list",
+      "regex": "^/dashboard/crew/list(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/crew/list(?:/)?$"
+    },
+    {
+      "page": "/dashboard/master",
+      "regex": "^/dashboard/master(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/master(?:/)?$"
+    },
+    {
+      "page": "/dashboard/master/users",
+      "regex": "^/dashboard/master/users(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/master/users(?:/)?$"
+    },
+    {
+      "page": "/dashboard/purchases",
+      "regex": "^/dashboard/purchases(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/purchases(?:/)?$"
+    },
+    {
+      "page": "/dashboard/reports",
+      "regex": "^/dashboard/reports(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/reports(?:/)?$"
+    },
+    {
+      "page": "/dashboard/reports/hra",
+      "regex": "^/dashboard/reports/hra(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/reports/hra(?:/)?$"
+    },
+    {
+      "page": "/dashboard/reports/portage-bill",
+      "regex": "^/dashboard/reports/portage\\-bill(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/reports/portage\\-bill(?:/)?$"
+    },
+    {
+      "page": "/dashboard/reports/slopchest",
+      "regex": "^/dashboard/reports/slopchest(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/reports/slopchest(?:/)?$"
+    },
+    {
+      "page": "/dashboard/reports/travel-hra",
+      "regex": "^/dashboard/reports/travel\\-hra(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/reports/travel\\-hra(?:/)?$"
+    },
+    {
+      "page": "/dashboard/reports/travel-wages",
+      "regex": "^/dashboard/reports/travel\\-wages(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/reports/travel\\-wages(?:/)?$"
+    },
+    {
+      "page": "/dashboard/slopchest",
+      "regex": "^/dashboard/slopchest(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/slopchest(?:/)?$"
+    },
+    {
+      "page": "/dashboard/travel-wages-hra",
+      "regex": "^/dashboard/travel\\-wages\\-hra(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/travel\\-wages\\-hra(?:/)?$"
+    },
+    {
+      "page": "/dashboard/vessel-management",
+      "regex": "^/dashboard/vessel\\-management(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/vessel\\-management(?:/)?$"
+    },
+    {
+      "page": "/dashboard/victualling",
+      "regex": "^/dashboard/victualling(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard/victualling(?:/)?$"
+    },
+    {
+      "page": "/login",
+      "regex": "^/login(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/login(?:/)?$"
+    }
+  ],
+  "dataRoutes": [],
+  "rsc": {
+    "header": "rsc",
+    "varyHeader": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch",
+    "prefetchHeader": "next-router-prefetch",
+    "didPostponeHeader": "x-nextjs-postponed",
+    "contentTypeHeader": "text/x-component",
+    "suffix": ".rsc",
+    "prefetchSegmentHeader": "next-router-segment-prefetch",
+    "prefetchSegmentSuffix": ".segment.rsc",
+    "prefetchSegmentDirSuffix": ".segments",
+    "clientParamParsing": false,
+    "dynamicRSCPrerender": false
+  },
+  "rewriteHeaders": {
+    "pathHeader": "x-nextjs-rewritten-path",
+    "queryHeader": "x-nextjs-rewritten-query"
+  }
+}
