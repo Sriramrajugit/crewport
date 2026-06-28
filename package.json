@@ -7,6 +7,7 @@
         "dev": "next dev -H 0.0.0.0",
         "build": "npm run build:ocr && next build",
         "build:ocr": "cd modules/ocr-extractor && npm run build && cd ../..",
+        "prestart": "prisma migrate deploy",
         "start": "next start",
         "lint": "eslint",
         "clean": "rimraf .next node_modules/.cache",
