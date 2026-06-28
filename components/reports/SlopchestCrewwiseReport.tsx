@@ -96,7 +96,7 @@ const SlopchestCrewwiseReport = forwardRef<{ handleExportExcel: () => void }, Pr
 
                     XLSX.writeFile(workbook, filename);
                 } catch (error) {
-                    console.error('Error exporting to Excel:', error);
+                    // Error exporting to Excel
                     alert('Failed to export Excel file');
                 }
             }
@@ -130,8 +130,8 @@ const SlopchestCrewwiseReport = forwardRef<{ handleExportExcel: () => void }, Pr
                     crew_name: c.crew_members.name,
                     rank: c.crew_members.rank,
                     consumption_date: c.consumption_date,
-                    item_code: c.slopchest_items.item_code,
-                    item_name: c.slopchest_items.item_name,
+                    item_code: c.inventory_items.item_code,
+                    item_name: c.inventory_items.item_name,
                     quantity: parseFloat(c.quantity.toString()),
                     unit_price: parseFloat(c.unit_price.toString()),
                     total_deduction: parseFloat(c.total_deduction.toString()),
@@ -146,7 +146,7 @@ const SlopchestCrewwiseReport = forwardRef<{ handleExportExcel: () => void }, Pr
                 setConsumptions(transformed);
             }
         } catch (err) {
-            console.error('Error fetching crew report:', err);
+            // Error fetching crew report
         } finally {
             setLoading(false);
         }
@@ -205,7 +205,7 @@ const SlopchestCrewwiseReport = forwardRef<{ handleExportExcel: () => void }, Pr
                                     <td className="px-6 py-3 text-gray-700">{crew.name}</td>
                                     <td className="px-6 py-3 text-center text-gray-700">{crew.itemCount}</td>
                                     <td className="px-6 py-3 text-right font-bold text-gray-900">
-                                        ₹{crew.total.toFixed(2)}
+                                        ${crew.total.toFixed(2)}
                                     </td>
                                 </tr>
                             ))}
@@ -219,7 +219,7 @@ const SlopchestCrewwiseReport = forwardRef<{ handleExportExcel: () => void }, Pr
                                     {consumptions.length}
                                 </td>
                                 <td className="px-6 py-3 text-right text-blue-600">
-                                    ₹{grandTotal.toFixed(2)}
+                                    ${grandTotal.toFixed(2)}
                                 </td>
                             </tr>
                         </tfoot>
@@ -262,10 +262,10 @@ const SlopchestCrewwiseReport = forwardRef<{ handleExportExcel: () => void }, Pr
                                     <td className="px-6 py-3 text-gray-700">{item.item_name}</td>
                                     <td className="px-6 py-3 text-center text-gray-700">{item.quantity}</td>
                                     <td className="px-6 py-3 text-right text-gray-700">
-                                        ₹{item.unit_price.toFixed(2)}
+                                        ${item.unit_price.toFixed(2)}
                                     </td>
                                     <td className="px-6 py-3 text-right font-bold text-gray-900">
-                                        ₹{item.total_deduction.toFixed(2)}
+                                        ${item.total_deduction.toFixed(2)}
                                     </td>
                                     <td className="px-6 py-3 text-gray-600 text-xs max-w-xs truncate">
                                         {item.notes || '-'}
@@ -279,7 +279,7 @@ const SlopchestCrewwiseReport = forwardRef<{ handleExportExcel: () => void }, Pr
                                     GRAND TOTAL
                                 </td>
                                 <td className="px-6 py-3 text-right text-green-600">
-                                    ₹{grandTotal.toFixed(2)}
+                                    ${grandTotal.toFixed(2)}
                                 </td>
                                 <td></td>
                             </tr>

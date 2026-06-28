@@ -1,0 +1,42 @@
+02/05/2026
+-	No of days – 31/30  - That need to be corrected.( For Ex if the joined on 2nd then that also need to be clacualted)
+
+-	Travel wages – Though 2/3 days approved., the amount is not saved in the report (PB).<Solved>
+
+-	HRA is in editable form in PB., we can be able to amend the number., we need to work on how if multiple HRA appear in same month., how the amount will reflect.
+
+Multiple Entries are not getting saved<Solved>
+
+Seperate Report to download Options <Solved>
+
+Show error as per the crew level rather generic message
+
+Once PB report generated for that month , TRAVEL,HRA and Deductions (Bond) must not allowed
+
+ONBOARD ALLOWANCE / SHORT MANNING :- Make this as Editable. <solved>
+
+
+-	As already dicsused, HRA is applicable for all the onboard staff., so we need to bring all the crew in the tab or we need to mention only the dates., so the allowances to be included in the earnings. If we need to know how much we have paid for HRA crew wise., we can select the drop down to show the crew list and print the screen. 
+<Solved>
+
+-	The wages are generated as per the contract, based on the sing on it should calculated on pro-rate basis.<Open>
+
+1. Feb Month Logic to check 
+2. For Pro-rated valeus need to fix for New joiners
+3. Check Why bought forward shows for new joiner
+4. PB PAst month billing to completed before current month
+
+
+
+-	 The Crew AAA is added/Sing on in May but in previous months reports the same crew name is reflecting.<Solved>
+
+-	If I add and approve the HRA/TRAVEL ALLOWANCES it is reflecting in the previous months reports instead of current month.<Solved>
+
+-	In Slopchest decution – Under Crew members  tab all the onboard crew for the respective vessels to be displayed., instead of it is reflecting only the person who signed on for the current month.<Solved>
+<Solved>
+
+-	Victualling ship man days is correct for the onboard staff.
+
+-	Victualling – in Outport messing under outport expenses there is no option to save additional data for other staff like owners are charterer expenses.
+
+-	Victualling/Bonded stores – Inventory report we need to check and close.

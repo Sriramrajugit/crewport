@@ -68,6 +68,19 @@ export async function POST(request: NextRequest) {
                 );
             }
 
+            // Check if this is a VESSEL user role
+            const userRole = await prisma.users_roles.findUnique({
+                where: { id: role_id },
+                select: { role_name: true }
+            });
+
+            if (userRole?.role_name === 'VESSEL' && selected_vessels.length > 1) {
+                return NextResponse.json(
+                    { error: 'Vessel users can only be assigned to one vessel' },
+                    { status: 400 }
+                );
+            }
+
             // Check if user already exists (using compound unique: company_id + email)
             const existingUser = await prisma.user.findUnique({
                 where: {

@@ -16,17 +16,41 @@ export default function Login() {
         setLoading(true);
         setError('');
 
-        // Simulated login for now
-        setTimeout(() => {
-            if (email && password) {
-                // Store fake session
-                localStorage.setItem('crewport_session', JSON.stringify({ email, role: email.includes('admin') ? 'ADMIN' : 'VESSEL' }));
-                router.push('/dashboard');
-            } else {
-                setError('Invalid credentials');
+        try {
+            // Call the login API endpoint
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ email, password }),
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                setError(data.error || 'Login failed');
+                setLoading(false);
+                return;
             }
+
+            const data = await response.json();
+            
+            // Store user info in localStorage for client-side access
+            localStorage.setItem('crewport_session', JSON.stringify({
+                email: data.user.email,
+                name: data.user.name,
+                role: data.user.role,
+                is_admin: data.user.is_admin
+            }));
+
+            // The cookie is automatically set by the response from the API
+            // Navigate to dashboard
+            router.push('/dashboard');
+        } catch (error) {
+            setError('An error occurred during login');
+        } finally {
             setLoading(false);
-        }, 1000);
+        }
     };
 
     return (

@@ -25,6 +25,9 @@
         "paths": {
             "@/*": [
                 "./*"
+            ],
+            "@crewport/ocr-extractor": [
+                "./modules/ocr-extractor/dist/index.js"
             ]
         }
     },
@@ -37,6 +40,8 @@
         "**/*.mts"
     ],
     "exclude": [
-        "node_modules"
+        "node_modules",
+        "modules/ocr-extractor/src",
+        "modules/ocr-extractor/examples"
     ]
 }

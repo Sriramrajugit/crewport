@@ -4,7 +4,6 @@ import { getVesselIdFromRequest, withVesselAccess } from '@/lib/accessControl';
 
 export async function GET(request: NextRequest) {
     try {
-        console.log('=== Crew API GET called ===');
         const { searchParams } = new URL(request.url);
         
         // Get vesselId from query params or headers
@@ -17,8 +16,6 @@ export async function GET(request: NextRequest) {
         const month = searchParams.get('month');
         const year = searchParams.get('year');
 
-        console.log('Fetching crew for vesselId:', vesselId, 'month:', month, 'year:', year);
-
         if (!vesselId) {
             return NextResponse.json(
                 { error: 'vesselId is required' },
@@ -26,7 +23,6 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        console.log('Executing Prisma query...');
         const whereClause: any = {
             deleted_at: null,
             vessel_id: parseInt(vesselId)
@@ -45,16 +41,16 @@ export async function GET(request: NextRequest) {
             firstDayOfMonth.setUTCHours(0, 0, 0, 0);
             lastDayOfMonth.setUTCHours(23, 59, 59, 999);
 
-            // Crew member must have signed on on or before the last day of the month
+            // Filter for crew who were onboarded (signed on) specifically in this month
             whereClause.sign_on_date = {
-                lte: lastDayOfMonth,
+                gte: firstDayOfMonth,
+                lte: lastDayOfMonth
             };
 
-            // Crew member must not have signed off before the first day of the month
-            // OR sign_off_date must be null (still active)
+            // Only show active crew members (not signed off or signed off after month start)
             whereClause.OR = [
                 { sign_off_date: null },
-                { sign_off_date: { gte: firstDayOfMonth } },
+                { sign_off_date: { gte: firstDayOfMonth } }
             ];
         }
 
@@ -74,6 +70,7 @@ export async function GET(request: NextRequest) {
                 sign_off_port: true,
                 exit_type: true,
                 exit_remarks: true,
+                contract_file: true,
                 onboarding_status: true,
                 crew_status: true,
                 basic_salary: true,
@@ -117,17 +114,13 @@ export async function GET(request: NextRequest) {
             },
         });
 
-        console.log('Found crew members:', crew.length);
         return NextResponse.json(crew);
     } catch (error) {
-        console.error('❌ Error in crew API GET:', error);
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error('Error details:', errorMessage);
         return NextResponse.json(
             { 
                 error: 'Failed to fetch crew',
                 details: errorMessage,
-                stack: error instanceof Error ? error.stack : 'No stack trace'
             },
             { status: 500 }
         );
@@ -138,14 +131,6 @@ export async function POST(request: NextRequest) {
     return withVesselAccess(request, async (vesselId, userId) => {
         try {
             const body = await request.json();
-
-            console.log('Received crew data:', { 
-                name: body.name, 
-                contact_number: body.contact_number,
-                vessel_id: body.vessel_id,
-                company_id: body.company_id,
-                created_by: body.created_by
-            });
 
             // Basic validation - trim strings to check for whitespace-only values
             const name = body.name?.trim() || '';
@@ -176,16 +161,19 @@ export async function POST(request: NextRequest) {
                     vessel_id: vesselId,  // Use validated vessel ID from context
                     company_id: companyId,
                     created_by: userId,   // Use authenticated user ID
+                    onboarding_status: 'PENDING',  // Explicitly set to PENDING
+                    crew_status: 'NEW',  // Explicitly set to NEW
                     contact_number: body.contact_number || null,
                     rank: body.rank || null,
                     position: position,
                     nationality: body.nationality || null,
                     sign_on_port: body.sign_on_port || null,
                     sign_on_date: body.sign_on_date ? new Date(body.sign_on_date) : null,
-                    sign_off_port: body.sign_off_port || null,
-                    sign_off_date: body.sign_off_date ? new Date(body.sign_off_date) : null,
+                    contract_duration_months: body.contract_duration_months ? parseInt(body.contract_duration_months) : null,
+                    tentative_sign_off_date: body.tentative_sign_off_date ? new Date(body.tentative_sign_off_date) : null,
                     passport_number: body.passport_number || null,
                     date_of_birth: body.date_of_birth ? new Date(body.date_of_birth) : null,
+                    contract_file: body.contract_file || null,
                     // Salary fields
                     basic_salary: body.basic_salary ? parseFloat(body.basic_salary) : null,
                     fixed_overtime: body.fixed_overtime ? parseFloat(body.fixed_overtime) : null,

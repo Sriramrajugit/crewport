@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
 interface Rank {
@@ -12,16 +13,12 @@ interface Rank {
 
 interface Port {
     id: number;
-    port_name: string;
-    port_code: string;
-    country?: string;
-}
-
-interface Vessel {
-    id: number;
-    vessel_name: string;
-    imo_number?: string;
-    vessel_type?: string;
+    code: string;
+    name: string;
+    country_code?: string;
+    zone_code?: string;
+    latitude?: number;
+    longitude?: number;
 }
 
 interface ExchangeRate {
@@ -31,20 +28,29 @@ interface ExchangeRate {
     effective_from: string;
 }
 
-type TabType = 'ranks' | 'ports' | 'vessels' | 'exchange';
+type TabType = 'ranks' | 'ports' | 'exchange';
 
 export default function MasterDataManagement() {
+    const router = useRouter();
     const [activeTab, setActiveTab] = useState<TabType>('ranks');
     const [loading, setLoading] = useState(false);
+    const [hasAccess, setHasAccess] = useState(false);
+    const [isCheckingAccess, setIsCheckingAccess] = useState(true);
     const [ranks, setRanks] = useState<Rank[]>([]);
     const [ports, setPorts] = useState<Port[]>([]);
-    const [vessels, setVessels] = useState<Vessel[]>([]);
     const [exchangeRates, setExchangeRates] = useState<ExchangeRate[]>([]);
+
+    // Ports filtering and pagination
+    const [portsLoading, setPortsLoading] = useState(false);
+    const [portsTotal, setPortsTotal] = useState(0);
+    const [portsOffset, setPortsOffset] = useState(0);
+    const [portsSearch, setPortsSearch] = useState('');
+    const [portsCountry, setPortsCountry] = useState('IN'); // Default to India
+    const [portsSortBy] = useState('name');
 
     // Form states
     const [rankForm, setRankForm] = useState({ rank_name: '', rank_code: '', description: '' });
-    const [portForm, setPortForm] = useState({ port_name: '', port_code: '', country: '' });
-    const [vesselForm, setVesselForm] = useState({ vessel_name: '', imo_number: '', vessel_type: '' });
+    const [portForm, setPortForm] = useState({ name: '', code: '', country_code: '', zone_code: '', latitude: '', longitude: '' });
     const [exchangeForm, setExchangeForm] = useState({ 
         usd_to_local: '', 
         local_currency_code: 'INR',
@@ -55,25 +61,87 @@ export default function MasterDataManagement() {
     const userId = 1; // MOCK FOR NOW
 
     useEffect(() => {
-        fetchAllData();
+        checkAccessAndFetchAllData();
     }, []);
+
+    // Load ports with filters
+    useEffect(() => {
+        if (activeTab === 'ports' && hasAccess) {
+            fetchPorts(0);
+        }
+    }, [activeTab, portsSearch, portsCountry, hasAccess]);
+
+    const checkAccessAndFetchAllData = async () => {
+        try {
+            setIsCheckingAccess(true);
+            
+            // Try to fetch users (which requires admin access) to check if user has access
+            const accessCheckRes = await fetch('/api/users');
+            
+            // If we get 403 (forbidden), user is not admin
+            if (accessCheckRes.status === 403) {
+                setHasAccess(false);
+                setIsCheckingAccess(false);
+                return;
+            }
+            
+            // If we get 401 (unauthorized), redirect to login
+            if (accessCheckRes.status === 401) {
+                router.push('/login');
+                return;
+            }
+            
+            // User has access, proceed with fetching data
+            setHasAccess(true);
+            await fetchAllData();
+        } catch (error) {
+            console.error('Error checking access:', error);
+            setHasAccess(false);
+        } finally {
+            setIsCheckingAccess(false);
+        }
+    };
+
+    const fetchPorts = async (offset: number = 0) => {
+        setPortsLoading(true);
+        try {
+            const params = new URLSearchParams({
+                limit: '10',
+                offset: offset.toString(),
+                sort: portsSortBy,
+                ...(portsSearch && { search: portsSearch }),
+                ...(portsCountry && { country_code: portsCountry }),
+            });
+
+            const response = await fetch(`/api/masters/ports?${params}`);
+            if (response.ok) {
+                const result = await response.json();
+                setPorts(result.data);
+                setPortsTotal(result.pagination.total);
+                setPortsOffset(offset);
+            }
+        } catch (error) {
+            console.error('Error fetching ports:', error);
+            alert('Error loading ports');
+        } finally {
+            setPortsLoading(false);
+        }
+    };
 
     const fetchAllData = async () => {
         setLoading(true);
         try {
-            const [ranksRes, portsRes, vesselsRes, exchangeRes] = await Promise.all([
+            const [ranksRes, exchangeRes] = await Promise.all([
                 fetch(`/api/masters/ranks?companyId=${companyId}`),
-                fetch('/api/masters/ports'),
-                fetch(`/api/masters/vessels?companyId=${companyId}`),
                 fetch(`/api/masters/exchange?companyId=${companyId}`)
             ]);
 
             if (ranksRes.ok) setRanks(await ranksRes.json());
-            if (portsRes.ok) setPorts(await portsRes.json());
-            if (vesselsRes.ok) setVessels(await vesselsRes.json());
             if (exchangeRes.ok) setExchangeRates(await exchangeRes.json());
+            
+            // Load default ports (India with limit 10)
+            await fetchPorts(0);
         } catch (error) {
-            console.error('Error fetching master data:', error);
             alert('Error loading master data');
         } finally {
             setLoading(false);
@@ -84,6 +152,15 @@ export default function MasterDataManagement() {
         e.preventDefault();
         if (!rankForm.rank_name || !rankForm.rank_code) {
             alert('Please fill in all required fields');
+            return;
+        }
+
+        // Check for duplicate rank (case-insensitive)
+        const rankNameLower = rankForm.rank_name.trim().toLowerCase();
+        const isDuplicate = ranks.some(rank => rank.rank_name.toLowerCase() === rankNameLower);
+        
+        if (isDuplicate) {
+            alert(`Rank "${rankForm.rank_name}" already exists. Rank names are case-insensitive.`);
             return;
         }
 
@@ -103,14 +180,13 @@ export default function MasterDataManagement() {
             setRankForm({ rank_name: '', rank_code: '', description: '' });
             fetchAllData();
         } catch (error) {
-            console.error('Error adding rank:', error);
             alert(`Error adding rank: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     };
 
     const handleAddPort = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!portForm.port_name || !portForm.port_code) {
+        if (!portForm.name || !portForm.code) {
             alert('Please fill in all required fields');
             return;
         }
@@ -125,36 +201,12 @@ export default function MasterDataManagement() {
             if (!response.ok) throw new Error('Failed to add port');
 
             alert('Port added successfully');
-            setPortForm({ port_name: '', port_code: '', country: '' });
-            fetchAllData();
+            setPortForm({ name: '', code: '', country_code: '', zone_code: '', latitude: '', longitude: '' });
+            // Refresh ports list
+            await fetchPorts(0);
         } catch (error) {
             console.error(error);
             alert('Error adding port');
-        }
-    };
-
-    const handleAddVessel = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!vesselForm.vessel_name) {
-            alert('Please fill in all required fields');
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/masters/vessels', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ...vesselForm, company_id: companyId }),
-            });
-
-            if (!response.ok) throw new Error('Failed to add vessel');
-
-            alert('Vessel added successfully');
-            setVesselForm({ vessel_name: '', imo_number: '', vessel_type: '' });
-            fetchAllData();
-        } catch (error) {
-            console.error(error);
-            alert('Error adding vessel');
         }
     };
 
@@ -192,6 +244,33 @@ export default function MasterDataManagement() {
         }
     };
 
+    // Show access check loading screen
+    if (isCheckingAccess) {
+        return (
+            <div className="space-y-6">
+                <h1 className="text-3xl font-bold text-gray-900 flex items-center">
+                    <span className="mr-3">⚙️</span>
+                    Master Data Management
+                </h1>
+                <p className="text-gray-600">Loading...</p>
+            </div>
+        );
+    }
+
+    // Show access denied message if user is not admin
+    if (!hasAccess) {
+        return (
+            <div className="space-y-6">
+                <h1 className="text-3xl font-bold text-gray-900">Access Denied</h1>
+                <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+                    <p className="text-red-800">
+                        You do not have permission to access the Master Data Management section. Only administrators can manage master data.
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-6">
             <div className="flex justify-between items-center">
@@ -210,7 +289,7 @@ export default function MasterDataManagement() {
             {/* Tabs */}
             <div className="border-b border-gray-200">
                 <div className="flex space-x-8">
-                    {(['ranks', 'ports', 'vessels', 'exchange'] as TabType[]).map((tab) => (
+                    {(['ranks', 'ports', 'exchange'] as TabType[]).map((tab) => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
@@ -234,12 +313,23 @@ export default function MasterDataManagement() {
                         <form onSubmit={handleAddRank} className="space-y-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Rank Name *</label>
-                                <input
-                                    type="text"
-                                    value={rankForm.rank_name}
-                                    onChange={(e) => setRankForm({ ...rankForm, rank_name: e.target.value })}
-                                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
-                                />
+                                <div>
+                                    <input
+                                        type="text"
+                                        value={rankForm.rank_name}
+                                        onChange={(e) => setRankForm({ ...rankForm, rank_name: e.target.value })}
+                                        className={`w-full mt-1 px-3 py-2 border rounded-md ${
+                                            rankForm.rank_name && ranks.some(rank => rank.rank_name.toLowerCase() === rankForm.rank_name.trim().toLowerCase())
+                                                ? 'border-red-300 bg-red-50'
+                                                : 'border-gray-300'
+                                        }`}
+                                    />
+                                    {rankForm.rank_name && ranks.some(rank => rank.rank_name.toLowerCase() === rankForm.rank_name.trim().toLowerCase()) && (
+                                        <p className="mt-1 text-xs text-red-600 font-medium">
+                                            ✗ This rank already exists (case-insensitive check)
+                                        </p>
+                                    )}
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Rank Code *</label>
@@ -261,7 +351,8 @@ export default function MasterDataManagement() {
                             </div>
                             <button
                                 type="submit"
-                                className="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700"
+                                disabled={!!(!rankForm.rank_name || !rankForm.rank_code || (rankForm.rank_name && ranks.some(rank => rank.rank_name.toLowerCase() === rankForm.rank_name.trim().toLowerCase())))}
+                                className="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:hover:bg-gray-400 transition-colors font-medium"
                             >
                                 Add Rank
                             </button>
@@ -287,117 +378,173 @@ export default function MasterDataManagement() {
 
             {/* Ports Tab */}
             {activeTab === 'ports' && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="space-y-6">
                     <div className="bg-white p-6 rounded-lg shadow">
                         <h2 className="text-xl font-semibold mb-4">Add New Port</h2>
                         <form onSubmit={handleAddPort} className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700">Port Name *</label>
-                                <input
-                                    type="text"
-                                    value={portForm.port_name}
-                                    onChange={(e) => setPortForm({ ...portForm, port_name: e.target.value })}
-                                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700">Port Code *</label>
-                                <input
-                                    type="text"
-                                    value={portForm.port_code}
-                                    onChange={(e) => setPortForm({ ...portForm, port_code: e.target.value })}
-                                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700">Country</label>
-                                <input
-                                    type="text"
-                                    value={portForm.country}
-                                    onChange={(e) => setPortForm({ ...portForm, country: e.target.value })}
-                                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
-                                />
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Port Name *</label>
+                                    <input
+                                        type="text"
+                                        value={portForm.name}
+                                        onChange={(e) => setPortForm({ ...portForm, name: e.target.value })}
+                                        className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Port Code *</label>
+                                    <input
+                                        type="text"
+                                        value={portForm.code}
+                                        onChange={(e) => setPortForm({ ...portForm, code: e.target.value })}
+                                        className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Country Code</label>
+                                    <input
+                                        type="text"
+                                        value={portForm.country_code}
+                                        onChange={(e) => setPortForm({ ...portForm, country_code: e.target.value })}
+                                        placeholder="e.g., IN, US, SG"
+                                        className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Zone Code</label>
+                                    <input
+                                        type="text"
+                                        value={portForm.zone_code}
+                                        onChange={(e) => setPortForm({ ...portForm, zone_code: e.target.value })}
+                                        placeholder="e.g., Asia, Europe"
+                                        className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Latitude</label>
+                                    <input
+                                        type="number"
+                                        step="0.000001"
+                                        value={portForm.latitude}
+                                        onChange={(e) => setPortForm({ ...portForm, latitude: e.target.value })}
+                                        placeholder="e.g., 13.067439"
+                                        className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Longitude</label>
+                                    <input
+                                        type="number"
+                                        step="0.000001"
+                                        value={portForm.longitude}
+                                        onChange={(e) => setPortForm({ ...portForm, longitude: e.target.value })}
+                                        placeholder="e.g., 80.278296"
+                                        className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
+                                    />
+                                </div>
                             </div>
                             <button
                                 type="submit"
-                                className="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700"
+                                className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700"
                             >
                                 Add Port
                             </button>
                         </form>
                     </div>
+
                     <div className="bg-white p-6 rounded-lg shadow">
                         <h2 className="text-xl font-semibold mb-4">Existing Ports</h2>
-                        <div className="space-y-2 max-h-96 overflow-y-auto">
-                            {ports.length === 0 ? (
-                                <p className="text-gray-500">No ports found</p>
-                            ) : (
-                                ports.map((port) => (
-                                    <div key={port.id} className="border-l-4 border-green-500 pl-4 py-2">
-                                        <p className="font-semibold">{port.port_name}</p>
-                                        <p className="text-sm text-gray-600">{port.port_code} • {port.country}</p>
-                                    </div>
-                                ))
-                            )}
+                        
+                        {/* Filters */}
+                        <div className="flex gap-4 mb-4">
+                            <div className="flex-1">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Search Port Name/Code</label>
+                                <input
+                                    type="text"
+                                    value={portsSearch}
+                                    onChange={(e) => setPortsSearch(e.target.value)}
+                                    placeholder="Search..."
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                                />
+                            </div>
+                            <div className="flex-1">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Country Code</label>
+                                <input
+                                    type="text"
+                                    value={portsCountry}
+                                    onChange={(e) => setPortsCountry(e.target.value)}
+                                    placeholder="e.g., IN, US"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                                />
+                            </div>
                         </div>
-                    </div>
-                </div>
-            )}
 
-            {/* Vessels Tab */}
-            {activeTab === 'vessels' && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div className="bg-white p-6 rounded-lg shadow">
-                        <h2 className="text-xl font-semibold mb-4">Add New Vessel</h2>
-                        <form onSubmit={handleAddVessel} className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700">Vessel Name *</label>
-                                <input
-                                    type="text"
-                                    value={vesselForm.vessel_name}
-                                    onChange={(e) => setVesselForm({ ...vesselForm, vessel_name: e.target.value })}
-                                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
-                                />
+                        {/* Ports Table */}
+                        <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                            <table className="w-full">
+                                <thead className="bg-gray-50 border-b border-gray-200">
+                                    <tr>
+                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Port Name</th>
+                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Code</th>
+                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Country</th>
+                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Zone</th>
+                                        <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Coordinates</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200">
+                                    {portsLoading ? (
+                                        <tr>
+                                            <td colSpan={5} className="px-4 py-3 text-center text-gray-500">
+                                                Loading ports...
+                                            </td>
+                                        </tr>
+                                    ) : ports.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={5} className="px-4 py-3 text-center text-gray-500">
+                                                No ports found
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        ports.map((port) => (
+                                            <tr key={port.id} className="hover:bg-gray-50">
+                                                <td className="px-4 py-3 text-sm font-medium text-gray-900">{port.name}</td>
+                                                <td className="px-4 py-3 text-sm text-gray-600">{port.code}</td>
+                                                <td className="px-4 py-3 text-sm text-gray-600">{port.country_code || '-'}</td>
+                                                <td className="px-4 py-3 text-sm text-gray-600">{port.zone_code || '-'}</td>
+                                                <td className="px-4 py-3 text-sm text-gray-600">
+                                                    {port.latitude || port.longitude
+                                                        ? `${port.latitude?.toFixed(4) || '-'}, ${port.longitude?.toFixed(4) || '-'}`
+                                                        : '-'}
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* Pagination */}
+                        <div className="mt-4 flex justify-between items-center">
+                            <span className="text-sm text-gray-600">
+                                Showing {ports.length === 0 ? 0 : portsOffset + 1}-{Math.min(portsOffset + 10, portsTotal)} of {portsTotal} ports
+                            </span>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => fetchPorts(Math.max(0, portsOffset - 10))}
+                                    disabled={portsOffset === 0 || portsLoading}
+                                    className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                                >
+                                    Previous
+                                </button>
+                                <button
+                                    onClick={() => fetchPorts(portsOffset + 10)}
+                                    disabled={portsOffset + 10 >= portsTotal || portsLoading}
+                                    className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                                >
+                                    Next
+                                </button>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700">IMO Number</label>
-                                <input
-                                    type="text"
-                                    value={vesselForm.imo_number}
-                                    onChange={(e) => setVesselForm({ ...vesselForm, imo_number: e.target.value })}
-                                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700">Vessel Type</label>
-                                <input
-                                    type="text"
-                                    value={vesselForm.vessel_type}
-                                    onChange={(e) => setVesselForm({ ...vesselForm, vessel_type: e.target.value })}
-                                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
-                                />
-                            </div>
-                            <button
-                                type="submit"
-                                className="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700"
-                            >
-                                Add Vessel
-                            </button>
-                        </form>
-                    </div>
-                    <div className="bg-white p-6 rounded-lg shadow">
-                        <h2 className="text-xl font-semibold mb-4">Existing Vessels</h2>
-                        <div className="space-y-2 max-h-96 overflow-y-auto">
-                            {vessels.length === 0 ? (
-                                <p className="text-gray-500">No vessels found</p>
-                            ) : (
-                                vessels.map((vessel) => (
-                                    <div key={vessel.id} className="border-l-4 border-purple-500 pl-4 py-2">
-                                        <p className="font-semibold">{vessel.vessel_name}</p>
-                                        <p className="text-sm text-gray-600">{vessel.imo_number} • {vessel.vessel_type}</p>
-                                    </div>
-                                ))
-                            )}
                         </div>
                     </div>
                 </div>

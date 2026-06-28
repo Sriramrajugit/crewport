@@ -35,7 +35,7 @@ export async function getClientVesselId(): Promise<number | null> {
             return user.assigned_vessels?.[0]?.vessel_id || null;
         }
     } catch (error) {
-        console.error('Error getting vessel ID:', error);
+        // Error getting vessel ID
     }
     return null;
 }

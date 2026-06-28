@@ -123,7 +123,7 @@ export default function BondPage() {
                                                         {parseFloat(record.exchange_rate).toFixed(4)}
                                                     </td>
                                                     <td className="px-6 py-4 text-right text-gray-900 font-medium">
-                                                        ₹{parseFloat(record.total_local).toLocaleString('en-IN', {
+                                                        ${parseFloat(record.total_local).toLocaleString('en-US', {
                                                             minimumFractionDigits: 2,
                                                             maximumFractionDigits: 2,
                                                         })}

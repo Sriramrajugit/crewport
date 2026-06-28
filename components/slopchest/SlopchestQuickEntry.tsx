@@ -7,6 +7,7 @@ interface Item {
     item_name: string;
     item_code: string;
     unit_price: number;
+    available_quantity: number;
     category: string | null;
 }
 
@@ -15,6 +16,7 @@ interface CrewMember {
     name: string;
     rank: string;
     sign_on_date: string;
+    crew_status?: string;
 }
 
 interface Props {
@@ -58,7 +60,7 @@ export default function SlopchestQuickEntry({
         if (activeTab === 'crew') {
             fetchCrewMembers();
         }
-    }, [vesselId, activeTab]);
+    }, [vesselId, activeTab, month, year]);
 
     const fetchItems = async () => {
         try {
@@ -72,7 +74,7 @@ export default function SlopchestQuickEntry({
                 setItems(await response.json());
             }
         } catch (err) {
-            console.error('Error fetching items:', err);
+            // Error fetching items
         } finally {
             setLoading(false);
         }
@@ -80,7 +82,8 @@ export default function SlopchestQuickEntry({
 
     const fetchCrewMembers = async () => {
         try {
-            const response = await fetch(`/api/crew?vesselId=${vesselId}&month=${month}&year=${year}`, {
+            // Fetch all active crew members for the vessel, not filtered by month/year
+            const response = await fetch(`/api/crew?vesselId=${vesselId}`, {
                 headers: {
                     'X-Vessel-Id': vesselId.toString()
                 }
@@ -91,13 +94,36 @@ export default function SlopchestQuickEntry({
                     id: cm.id,
                     name: cm.name,
                     rank: cm.rank,
-                    sign_on_date: cm.sign_on_date
+                    sign_on_date: cm.sign_on_date,
+                    crew_status: cm.crew_status
                 })));
             }
         } catch (err) {
-            console.error('Error fetching crew:', err);
+            // Error fetching crew
         }
     };
+
+    // Calculate min and max dates for the selected month
+    const getDateRangeForMonth = () => {
+        const firstDayOfMonth = new Date(year, month - 1, 1);
+        const lastDayOfMonth = new Date(year, month, 0);
+        const today = new Date();
+
+        // Min date is the first day of the selected month
+        const minDate = firstDayOfMonth.toISOString().split('T')[0];
+        
+        // Max date is either the last day of the month or today, whichever is earlier
+        const maxDate = lastDayOfMonth < today 
+            ? lastDayOfMonth.toISOString().split('T')[0]
+            : today.toISOString().split('T')[0];
+
+        return { minDate, maxDate };
+    };
+
+    const { minDate, maxDate } = getDateRangeForMonth();
+
+    // No additional filtering needed - the API already returns crew onboarded in the selected month
+    const activeCrewMembers = crewMembers;
 
     const handleSubmitCrew = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -109,6 +135,27 @@ export default function SlopchestQuickEntry({
             return;
         }
 
+        const qtyValue = parseFloat(quantity);
+
+        // Validate quantity is not negative
+        if (qtyValue < 0) {
+            setError('Quantity cannot be negative');
+            return;
+        }
+
+        // Validate quantity is not zero
+        if (qtyValue === 0) {
+            setError('Quantity must be greater than 0');
+            return;
+        }
+
+        // Get selected item to check available quantity
+        const selectedItemObj = items.find(item => item.id === parseInt(selectedItem));
+        if (selectedItemObj && qtyValue > selectedItemObj.available_quantity) {
+            setError(`Insufficient quantity. Available: ${selectedItemObj.available_quantity}, Requested: ${qtyValue}`);
+            return;
+        }
+
         // Validate consumption date is not in the future
         const consumptionDateTime = new Date(consumptionDate);
         const todayDateTime = new Date();
@@ -117,6 +164,17 @@ export default function SlopchestQuickEntry({
         
         if (consumptionDateTime > todayDateTime) {
             setError('Cannot record consumption for future dates');
+            return;
+        }
+
+        // Validate consumption date is within the selected month
+        const minDateTime = new Date(minDate);
+        const maxDateTime = new Date(maxDate);
+        minDateTime.setHours(0, 0, 0, 0);
+        maxDateTime.setHours(0, 0, 0, 0);
+
+        if (consumptionDateTime < minDateTime || consumptionDateTime > maxDateTime) {
+            setError(`Consumption date must be between ${new Date(minDate).toLocaleDateString('en-IN')} and ${new Date(maxDate).toLocaleDateString('en-IN')}`);
             return;
         }
 
@@ -159,6 +217,11 @@ export default function SlopchestQuickEntry({
                 setSelectedItem('');
                 setQuantity('');
                 setNotes('');
+                
+                // Refresh items to show updated quantities
+                fetchItems();
+                
+                // Call parent callback
                 onEntryAdded();
                 setTimeout(() => setSuccess(''), 3000);
             } else {
@@ -182,6 +245,27 @@ export default function SlopchestQuickEntry({
             return;
         }
 
+        const qtyValue = parseFloat(quantityOnSigner);
+
+        // Validate quantity is not negative
+        if (qtyValue < 0) {
+            setError('Quantity cannot be negative');
+            return;
+        }
+
+        // Validate quantity is not zero
+        if (qtyValue === 0) {
+            setError('Quantity must be greater than 0');
+            return;
+        }
+
+        // Get selected item to check available quantity
+        const selectedItemObj = items.find(item => item.id === parseInt(selectedItemOnSigner));
+        if (selectedItemObj && qtyValue > selectedItemObj.available_quantity) {
+            setError(`Insufficient quantity. Available: ${selectedItemObj.available_quantity}, Requested: ${qtyValue}`);
+            return;
+        }
+
         // Validate consumption date is not in the future
         const consumptionDateTimeOnSigner = new Date(consumptionDateOnSigner);
         const todayDateTimeOnSigner = new Date();
@@ -190,6 +274,17 @@ export default function SlopchestQuickEntry({
         
         if (consumptionDateTimeOnSigner > todayDateTimeOnSigner) {
             setError('Cannot record consumption for future dates');
+            return;
+        }
+
+        // Validate consumption date is within the selected month
+        const minDateTimeOnSigner = new Date(minDate);
+        const maxDateTimeOnSigner = new Date(maxDate);
+        minDateTimeOnSigner.setHours(0, 0, 0, 0);
+        maxDateTimeOnSigner.setHours(0, 0, 0, 0);
+
+        if (consumptionDateTimeOnSigner < minDateTimeOnSigner || consumptionDateTimeOnSigner > maxDateTimeOnSigner) {
+            setError(`Consumption date must be between ${new Date(minDate).toLocaleDateString('en-IN')} and ${new Date(maxDate).toLocaleDateString('en-IN')}`);
             return;
         }
 
@@ -219,6 +314,11 @@ export default function SlopchestQuickEntry({
                 setSelectedItemOnSigner('');
                 setQuantityOnSigner('');
                 setRemarks('');
+                
+                // Refresh items to show updated quantities
+                fetchItems();
+                
+                // Call parent callback
                 onEntryAdded();
                 setTimeout(() => setSuccess(''), 3000);
             } else {
@@ -239,7 +339,7 @@ export default function SlopchestQuickEntry({
     return (
         <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6 sticky top-20">
             <h2 className="text-lg font-bold text-gray-900 mb-4">
-                {activeTab === 'crew' ? 'Quick Entry - Crew' : 'Quick Entry - On-Signers'}
+                {activeTab === 'crew' ? 'Quick Entry - Crew' : 'Quick Entry - Owners/charterer'}
             </h2>
 
             {error && (
@@ -264,10 +364,13 @@ export default function SlopchestQuickEntry({
                             type="date"
                             value={consumptionDate}
                             onChange={(e) => setConsumptionDate(e.target.value)}
-                            max={new Date().toISOString().split('T')[0]}
+                            min={minDate}
+                            max={maxDate}
                             className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                         />
-                        <p className="text-xs text-gray-500 mt-1">Date must be today or in the past</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                            Date must be between {new Date(minDate).toLocaleDateString('en-IN')} and {new Date(maxDate).toLocaleDateString('en-IN')}
+                        </p>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -279,7 +382,7 @@ export default function SlopchestQuickEntry({
                             className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                         >
                             <option value="">Select crew member...</option>
-                            {crewMembers.map(crew => (
+                            {activeCrewMembers.map(crew => (
                                 <option key={crew.id} value={crew.id}>
                                     {crew.name} ({crew.rank})
                                 </option>
@@ -299,7 +402,7 @@ export default function SlopchestQuickEntry({
                             <option value="">Select item...</option>
                             {items.map(item => (
                                 <option key={item.id} value={item.id}>
-                                    {item.item_name} - ₹{parseFloat(item.unit_price.toString()).toFixed(2)}
+                                    {item.item_name} - ${parseFloat(item.unit_price.toString()).toFixed(2)} - Qty: {parseFloat(item.available_quantity.toString()).toFixed(2)}
                                 </option>
                             ))}
                         </select>
@@ -351,10 +454,13 @@ export default function SlopchestQuickEntry({
                             type="date"
                             value={consumptionDateOnSigner}
                             onChange={(e) => setConsumptionDateOnSigner(e.target.value)}
-                            max={new Date().toISOString().split('T')[0]}
+                            min={minDate}
+                            max={maxDate}
                             className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                         />
-                        <p className="text-xs text-gray-500 mt-1">Date must be today or in the past</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                            Date must be between {new Date(minDate).toLocaleDateString('en-IN')} and {new Date(maxDate).toLocaleDateString('en-IN')}
+                        </p>
                     </div>
 
                     <div>
@@ -382,7 +488,7 @@ export default function SlopchestQuickEntry({
                             <option value="">Select item...</option>
                             {items.map(item => (
                                 <option key={item.id} value={item.id}>
-                                    {item.item_name} - ₹{parseFloat(item.unit_price.toString()).toFixed(2)}
+                                    {item.item_name} - ${parseFloat(item.unit_price.toString()).toFixed(2)} - Qty: {parseFloat(item.available_quantity.toString()).toFixed(2)}
                                 </option>
                             ))}
                         </select>

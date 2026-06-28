@@ -2,26 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withVesselAccess, withAdminAccess } from '@/lib/accessControl';
 
-// Get all slopchest items for company
+// Get all slopchest items for vessel
 export async function GET(request: NextRequest) {
     return withVesselAccess(request, async (vesselId, userId) => {
         try {
-            // Get vessel details to fetch company_id
-            const vessel = await prisma.vessel.findUnique({
-                where: { id: vesselId },
-                select: { company_id: true }
-            });
-
-            if (!vessel) {
-                return NextResponse.json(
-                    { error: 'Vessel not found' },
-                    { status: 404 }
-                );
-            }
-
-            const items = await prisma.slopchestItem.findMany({
+            const items = await prisma.inventoryItem.findMany({
                 where: {
-                    company_id: vessel.company_id,
+                    vessel_id: vesselId,
+                    inventory_type: 'SLOPCHEST',
                     is_active: true
                 },
                 orderBy: [
@@ -46,18 +34,20 @@ export async function POST(request: NextRequest) {
     return withAdminAccess(request, async (userId) => {
         try {
             const body = await request.json();
-            const { company_id, item_name, item_code, unit_price, unit, category } = body;
+            const { company_id, vessel_id, item_name, item_code, unit_price, unit, category } = body;
 
-            if (!company_id || !item_name || !item_code || !unit_price) {
+            if (!company_id || !vessel_id || !item_name || !item_code || !unit_price) {
                 return NextResponse.json(
-                    { error: 'Missing required fields: company_id, item_name, item_code, unit_price' },
+                    { error: 'Missing required fields: company_id, vessel_id, item_name, item_code, unit_price' },
                     { status: 400 }
                 );
             }
 
-            const newItem = await prisma.slopchestItem.create({
+            const newItem = await prisma.inventoryItem.create({
                 data: {
                     company_id: parseInt(company_id),
+                    vessel_id: parseInt(vessel_id),
+                    inventory_type: 'SLOPCHEST',
                     item_name,
                     item_code,
                     unit_price: parseFloat(unit_price),
@@ -74,7 +64,7 @@ export async function POST(request: NextRequest) {
             // Handle unique constraint violation
             if (error.code === 'P2002') {
                 return NextResponse.json(
-                    { error: 'Item code already exists for this company' },
+                    { error: 'Item code already exists for this vessel' },
                     { status: 400 }
                 );
             }

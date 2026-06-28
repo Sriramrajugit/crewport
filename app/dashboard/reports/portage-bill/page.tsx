@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { formatDateDDMMYYYY } from '@/lib/formatters';
 import { useVessel } from '@/app/context/VesselContext';
+import * as XLSX from 'xlsx';
 
 interface CrewMember {
     id: number;
@@ -12,6 +13,8 @@ interface CrewMember {
     date_of_birth?: string | null;
     sign_on_date?: string | null;
     sign_off_date?: string | null;
+    exit_type?: string | null;
+    exit_remarks?: string | null;
     basic_salary?: number | null;
     fixed_overtime?: number | null;
     leave_wages?: number | null;
@@ -51,6 +54,16 @@ interface VesselData {
     vessel_name: string;
 }
 
+interface EditableEarningsFields {
+    cash_drawn: string;
+    home_allowance: string;
+    other_deduction: string;
+    travel_wages: string;
+    joining_expenses: string;
+    hra: string;
+    onboard_allowance_short_manning: string;
+}
+
 export default function PortageBill() {
     const { selectedVessel } = useVessel();
     const [crewData, setCrewData] = useState<CrewWithEarnings[]>([]);
@@ -58,15 +71,9 @@ export default function PortageBill() {
     const [month, setMonth] = useState('');
     const [year, setYear] = useState('');
     const [editingId, setEditingId] = useState<number | string | null>(null);
-    const [editValues, setEditValues] = useState<Record<number | string, {
-        cash_drawn: string;
-        home_allowance: string;
-        other_deduction: string;
-        travel_wages: string;
-        joining_expenses: string;
-        hra: string;
-    }>>({});
-    const [validationErrors, setValidationErrors] = useState<Record<number | string, string[]>>({});
+    const [editValues, setEditValues] = useState<{ [key: number | string]: EditableEarningsFields }>({});
+    const [validationErrors, setValidationErrors] = useState<{ [key: number | string]: string[] }>({});
+    const [finalizedRecords, setFinalizedRecords] = useState<Set<number | string>>(new Set());
 
     // Helper function to determine if this is the first month for a crew member
     const isFirstMonth = (signOnDate: string | null | undefined): boolean => {
@@ -131,7 +138,7 @@ export default function PortageBill() {
         if (!cashError.valid) errors.push(`Cash Drawn: ${cashError.error}`);
         
         const homeError = validateDeductionValue(homeAllowance);
-        if (!homeError.valid) errors.push(`Home Allowance: ${homeError.error}`);
+        if (!homeError.valid) errors.push(`Home Allotment: ${homeError.error}`);
         
         const otherError = validateDeductionValue(otherDeduction);
         if (!otherError.valid) errors.push(`Other Deduction: ${otherError.error}`);
@@ -237,7 +244,7 @@ export default function PortageBill() {
             setLoading(true);
             if (!selectedVessel) return;
 
-            // Fetch crew with earnings and slopchest deductions
+            // Fetch crew with earnings and slopchest deductions for current month
             const crewRes = await fetch(
                 `/api/crew/earnings-with-slopchest?month=${month}&year=${year}`,
                 {
@@ -249,15 +256,140 @@ export default function PortageBill() {
             
             if (!crewRes.ok) {
                 const errorData = await crewRes.json();
-                console.error('Crew API Error:', errorData);
+                // Crew API Error - handled in user message
                 throw new Error(`Failed to fetch crew: ${errorData.details || errorData.error}`);
             }
             
-            const crewWithEarnings: CrewWithEarnings[] = await crewRes.json();
+            let crewWithEarnings: CrewWithEarnings[] = await crewRes.json();
+
+            // Fetch previous month's earnings to calculate brought forward
+            if (parseInt(month) > 1) {
+                const prevMonth = String(parseInt(month) - 1).padStart(2, '0');
+                const prevYear = year;
+                
+                const prevMonthRes = await fetch(
+                    `/api/crew/earnings-with-slopchest?month=${prevMonth}&year=${prevYear}`,
+                    {
+                        headers: {
+                            'X-Vessel-Id': selectedVessel.vessel_id.toString()
+                        }
+                    }
+                );
+                
+                if (prevMonthRes.ok) {
+                    const prevMonthCrew: CrewWithEarnings[] = await prevMonthRes.json();
+                    
+                    // Create a map of previous month earnings by crew_member_id for quick lookup
+                    const prevMonthEarningsMap = new Map();
+                    prevMonthCrew.forEach((member: CrewWithEarnings) => {
+                        if (member.earnings) {
+                            prevMonthEarningsMap.set(member.id, member.earnings);
+                        }
+                    });
+                    
+                    // Update current month crew with brought_forward from previous month's final balance
+                    crewWithEarnings = crewWithEarnings.map((member: CrewWithEarnings) => {
+                        const prevEarnings = prevMonthEarningsMap.get(member.id);
+                        if (prevEarnings && member.earnings) {
+                            // Calculate previous month's final balance
+                            // Final Balance = Total Earnings - Total Deductions + Brought Forward from previous month
+                            const prevTotalEarnings = (
+                                parseFloat(String(prevEarnings.basic_salary || 0)) +
+                                parseFloat(String(prevEarnings.fixed_overtime || 0)) +
+                                parseFloat(String(prevEarnings.leave_wages || 0)) +
+                                parseFloat(String(prevEarnings.other_allowances || 0)) +
+                                parseFloat(String(prevEarnings.travel_wages || 0)) +
+                                parseFloat(String(prevEarnings.hra || 0)) +
+                                parseFloat(String(prevEarnings.joining_expenses || 0)) +
+                                parseFloat(String(prevEarnings.onboard_allowance_short_manning || 0))
+                            );
+                            const prevTotalDeductions = (
+                                parseFloat(String(prevEarnings.cash_drawn || 0)) +
+                                parseFloat(String(prevEarnings.home_allowance || 0)) +
+                                parseFloat(String(prevEarnings.bond_deduction || 0)) +
+                                parseFloat(String(prevEarnings.other_deduction || 0))
+                            );
+                            const prevFinalBalance = Math.round((prevTotalEarnings - prevTotalDeductions + parseFloat(String(prevEarnings.brought_forward || 0))) * 100) / 100;
+                            
+                            // Set brought_forward for current month to previous month's final balance
+                            return {
+                                ...member,
+                                earnings: {
+                                    ...member.earnings,
+                                    brought_forward: prevFinalBalance
+                                }
+                            };
+                        }
+                        return member;
+                    });
+                }
+            } else if (parseInt(month) === 1 && parseInt(year) > 1) {
+                // First month of the year - fetch from previous year
+                const prevMonth = '12';
+                const prevYear = String(parseInt(year) - 1);
+                
+                const prevMonthRes = await fetch(
+                    `/api/crew/earnings-with-slopchest?month=${prevMonth}&year=${prevYear}`,
+                    {
+                        headers: {
+                            'X-Vessel-Id': selectedVessel.vessel_id.toString()
+                        }
+                    }
+                );
+                
+                if (prevMonthRes.ok) {
+                    const prevMonthCrew: CrewWithEarnings[] = await prevMonthRes.json();
+                    
+                    // Create a map of previous month earnings by crew_member_id for quick lookup
+                    const prevMonthEarningsMap = new Map();
+                    prevMonthCrew.forEach((member: CrewWithEarnings) => {
+                        if (member.earnings) {
+                            prevMonthEarningsMap.set(member.id, member.earnings);
+                        }
+                    });
+                    
+                    // Update current month crew with brought_forward from previous month's final balance
+                    crewWithEarnings = crewWithEarnings.map((member: CrewWithEarnings) => {
+                        const prevEarnings = prevMonthEarningsMap.get(member.id);
+                        if (prevEarnings && member.earnings) {
+                            // Calculate previous month's final balance
+                            const prevTotalEarnings = (
+                                parseFloat(String(prevEarnings.basic_salary || 0)) +
+                                parseFloat(String(prevEarnings.fixed_overtime || 0)) +
+                                parseFloat(String(prevEarnings.leave_wages || 0)) +
+                                parseFloat(String(prevEarnings.other_allowances || 0)) +
+                                parseFloat(String(prevEarnings.travel_wages || 0)) +
+                                parseFloat(String(prevEarnings.hra || 0)) +
+                                parseFloat(String(prevEarnings.joining_expenses || 0)) +
+                                parseFloat(String(prevEarnings.onboard_allowance_short_manning || 0))
+                            );
+                            const prevTotalDeductions = (
+                                parseFloat(String(prevEarnings.cash_drawn || 0)) +
+                                parseFloat(String(prevEarnings.home_allowance || 0)) +
+                                parseFloat(String(prevEarnings.bond_deduction || 0)) +
+                                parseFloat(String(prevEarnings.other_deduction || 0))
+                            );
+                            const prevFinalBalance = Math.round((prevTotalEarnings - prevTotalDeductions + parseFloat(String(prevEarnings.brought_forward || 0))) * 100) / 100;
+                            
+                            // Set brought_forward for current month to previous month's final balance
+                            return {
+                                ...member,
+                                earnings: {
+                                    ...member.earnings,
+                                    brought_forward: prevFinalBalance
+                                }
+                            };
+                        }
+                        return member;
+                    });
+                }
+            }
+            
             setCrewData(crewWithEarnings);
             
             // Initialize edit values for all crew members
-            const newEditValues: Record<number | string, any> = {};
+            const newEditValues: { [key: number | string]: any } = {};
+            const newFinalizedRecords = new Set<number | string>();
             
             crewWithEarnings.forEach((member: CrewWithEarnings) => {
                 const earning = member.earnings;
@@ -268,18 +400,23 @@ export default function PortageBill() {
                     cash_drawn: String(earning?.cash_drawn || ''),
                     home_allowance: String(earning?.home_allowance || ''),
                     other_deduction: String(earning?.other_deduction || ''),
-                    // Travel Wages: editable only in first month
-                    travel_wages: String(earning?.travel_wages || (firstMonth ? '' : (member.travel_wages || ''))),
+                    // Travel Wages: now read-only, pre-fetched from earnings table
+                    travel_wages: String(earning?.travel_wages || ''),
                     // Joining Expenses: editable only in first month
                     joining_expenses: String(earning?.joining_expenses || (firstMonth ? '' : (member.joining_expenses || ''))),
-                    // HRA: always editable
+                    // HRA: read-only, auto-populated from Travel Wages & HRA screen
                     hra: String(earning?.hra || (member.hra || '')),
                 };
+                
+                // Mark records that have earnings data (already saved) as finalized
+                if (earning && (earning.cash_drawn !== null || earning.home_allowance !== null || earning.other_deduction !== null)) {
+                    newFinalizedRecords.add(earningId);
+                }
             });
             
             setEditValues(newEditValues);
+            setFinalizedRecords(newFinalizedRecords);
         } catch (error) {
-            console.error('Error fetching crew data:', error);
             alert(`Error loading portage bill: ${error instanceof Error ? error.message : 'Unknown error'}`);
         } finally {
             setLoading(false);
@@ -288,6 +425,11 @@ export default function PortageBill() {
 
     const updateFieldValue = (earningId: number | string | null, field: string, value: string) => {
         if (!earningId) return;
+        
+        // Prevent editing of travel_wages as it's now read-only
+        if (field === 'travel_wages') {
+            return;
+        }
         
         // Validate the field value
         const fieldError = validateDeductionValue(value);
@@ -319,6 +461,7 @@ export default function PortageBill() {
                 travel_wages: prev[earningId]?.travel_wages ?? '',
                 joining_expenses: prev[earningId]?.joining_expenses ?? '',
                 hra: prev[earningId]?.hra ?? '',
+                onboard_allowance_short_manning: prev[earningId]?.onboard_allowance_short_manning ?? '',
                 [field]: value,
             }
         }));
@@ -347,6 +490,17 @@ export default function PortageBill() {
                 return;
             }
 
+            // Check if crew member has exited - prevent entries after exit date
+            if (member.sign_off_date) {
+                const signOffDate = new Date(member.sign_off_date);
+                const monthYear = new Date(parseInt(year), parseInt(month) - 1, 1);
+                
+                if (signOffDate < monthYear) {
+                    alert(`Cannot add earnings: ${member.name} has already exited on ${signOffDate.toDateString()}.\n\nNo deductions or earnings can be added after the exit date.`);
+                    return;
+                }
+            }
+
             // Validate deductions
             const validation = validateDeductions(member, values.cash_drawn || '', values.home_allowance || '', values.other_deduction || '');
             if (!validation.valid) {
@@ -359,10 +513,10 @@ export default function PortageBill() {
                                  (member.fixed_overtime || 0) + 
                                  (member.leave_wages || 0) + 
                                  (member.other_allowances || 0) + 
-                                 (values?.travel_wages ? parseFloat(values.travel_wages) : (member.earnings?.travel_wages || 0)) + 
+                                 (member.earnings?.travel_wages || 0) + 
                                  (values?.hra ? parseFloat(values.hra) : (member.earnings?.hra || 0)) + 
                                  (values?.joining_expenses ? parseFloat(values.joining_expenses) : (member.earnings?.joining_expenses || 0)) + 
-                                 (member.earnings?.onboard_allowance_short_manning || 0);
+                                 (values?.onboard_allowance_short_manning ? parseFloat(values.onboard_allowance_short_manning) : (member.earnings?.onboard_allowance_short_manning || 0));
             
             const cash = parseFloat(values.cash_drawn || '0');
             const home = parseFloat(values.home_allowance || '0');
@@ -380,9 +534,9 @@ export default function PortageBill() {
                 values.cash_drawn !== String(member.earnings?.cash_drawn || '') ||
                 values.home_allowance !== String(member.earnings?.home_allowance || '') ||
                 values.other_deduction !== String(member.earnings?.other_deduction || '') ||
-                values.travel_wages !== String(member.earnings?.travel_wages || '') ||
-                values.joining_expenses !== String(member.earnings?.joining_expenses || '') ||
-                values.hra !== String(member.earnings?.hra || '');
+                values.onboard_allowance_short_manning !== String(member.earnings?.onboard_allowance_short_manning || '') ||
+                // travel_wages no longer checked as it's read-only
+                values.joining_expenses !== String(member.earnings?.joining_expenses || '');
 
             if (!hasChanges) {
                 alert('No changes detected. Please modify values before saving.');
@@ -404,8 +558,8 @@ export default function PortageBill() {
                     cash_drawn: parseFloat(values.cash_drawn) || 0,
                     home_allowance: parseFloat(values.home_allowance) || 0,
                     other_deduction: parseFloat(values.other_deduction) || 0,
+                    onboard_allowance_short_manning: values.onboard_allowance_short_manning ? parseFloat(values.onboard_allowance_short_manning) : 0,
                 };
-                console.log('Creating earnings with payload:', createPayload);
                 response = await fetch(`/api/crew/earnings`, {
                     method: 'POST',
                     headers: { 
@@ -420,11 +574,10 @@ export default function PortageBill() {
                     cash_drawn: parseFloat(values.cash_drawn) || 0,
                     home_allowance: parseFloat(values.home_allowance) || 0,
                     other_deduction: parseFloat(values.other_deduction) || 0,
-                    travel_wages: values.travel_wages ? parseFloat(values.travel_wages) : undefined,
+                    onboard_allowance_short_manning: values.onboard_allowance_short_manning ? parseFloat(values.onboard_allowance_short_manning) : undefined,
+                    // travel_wages is now read-only, pre-fetched from earnings table
                     joining_expenses: values.joining_expenses ? parseFloat(values.joining_expenses) : undefined,
-                    hra: values.hra ? parseFloat(values.hra) : undefined,
                 };
-                console.log('Updating earnings with payload:', updatePayload);
                 response = await fetch(`/api/crew/earnings/${earningId}`, {
                     method: 'PUT',
                     headers: { 
@@ -439,25 +592,23 @@ export default function PortageBill() {
                 let errorMessage = 'Failed to update earnings';
                 try {
                     const errorData = await response.json();
-                    console.error('Server error response:', errorData);
                     errorMessage = errorData.details || errorData.error || errorMessage;
                 } catch (e) {
                     // If response is not JSON, use status text
-                    console.error('Response status:', response.status, response.statusText);
                     errorMessage = response.statusText || errorMessage;
                 }
                 throw new Error(errorMessage);
             }
             
             const responseData = await response.json();
-            console.log('Success response:', responseData);
 
-            alert('Earnings updated successfully');
+            alert('Earnings updated successfully. This record is now finalized and cannot be edited again.');
             setEditingId(null);
+            // Mark record as finalized to prevent re-editing
+            setFinalizedRecords(prev => new Set([...prev, earningId]));
             // Refresh data to get updated earnings
             fetchCrewData();
         } catch (error) {
-            console.error('Error saving earnings:', error);
             alert(`Error saving earnings: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     };
@@ -467,7 +618,7 @@ export default function PortageBill() {
     };
 
     const getMonthName = () => {
-        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
         return months[parseInt(month) - 1] || '';
     };
 
@@ -477,33 +628,77 @@ export default function PortageBill() {
         return officerRanks.some(r => rank.toLowerCase().includes(r.toLowerCase())) ? 'OFFICERS' : 'RATINGS';
     };
 
-    const getCrewStatus = (member: CrewWithEarnings): 'ACTIVE' | 'RELIEVED' => {
+    const getCrewStatus = (member: CrewWithEarnings): 'ACTIVE' | 'RELIEVED' | 'NOT_JOINED' => {
+        // Check if crew member has joined yet
+        if (member.sign_on_date) {
+            const signOnDate = new Date(member.sign_on_date);
+            const signOnMonth = signOnDate.getMonth() + 1;
+            const signOnYear = signOnDate.getFullYear();
+            
+            // If sign-on date is after current month being viewed, crew hasn't joined yet
+            if (signOnYear > parseInt(year) || (signOnYear === parseInt(year) && signOnMonth > parseInt(month))) {
+                return 'NOT_JOINED';
+            }
+        }
+        
         if (!member.sign_off_date) return 'ACTIVE';
         
         const signOffDate = new Date(member.sign_off_date);
         const signOffMonth = signOffDate.getMonth() + 1;
         const signOffYear = signOffDate.getFullYear();
         
-        // If signed off in current month/year, they are relieved
+        // Session C - Off Signers: Show ONLY if signed off in the EXACT month being viewed
+        // This ensures they appear only once in that month's Portage Bill, never in subsequent months
         if (signOffMonth === parseInt(month) && signOffYear === parseInt(year)) {
             return 'RELIEVED';
         }
         
-        // If signed off before current month, they're relieved (not shown or in relieved section)
+        // If signed off before current month, they are NOT shown (they are not active anymore)
+        // They will not appear in any session
         if (signOffYear < parseInt(year) || (signOffYear === parseInt(year) && signOffMonth < parseInt(month))) {
-            return 'RELIEVED';
+            return 'RELIEVED'; // This will exclude them from all sessions as they should not be displayed
         }
         
         return 'ACTIVE';
     };
 
-    const groupedCrew = crewData.reduce((acc, member) => {
+    // Filter: Only show ACTIVE crew members (those who haven't signed off)
+    // or those who signed off in the current month (Session C - Off-Signers)
+    // Exclude crew members who haven't joined yet
+    const crewDataFiltered = crewData.filter(member => {
         const status = getCrewStatus(member);
-        const category = status === 'ACTIVE' ? 'ACTIVE' : 'RELIEVED';
-        if (!acc[category]) acc[category] = [];
-        acc[category].push(member);
+        // Exclude crew who haven't joined yet
+        if (status === 'NOT_JOINED') return false;
+        // Include only active members OR those relieved in this specific month
+        if (status === 'ACTIVE') return true;
+        if (status === 'RELIEVED' && member.sign_off_date) {
+            const signOffDate = new Date(member.sign_off_date);
+            const signOffMonth = signOffDate.getMonth() + 1;
+            const signOffYear = signOffDate.getFullYear();
+            return signOffMonth === parseInt(month) && signOffYear === parseInt(year);
+        }
+        return false;
+    });
+
+    const groupedCrew = crewDataFiltered.reduce((acc, member) => {
+        const status = getCrewStatus(member);
+        const rankCategory = getRankCategory(member.rank);
+        
+        if (status === 'RELIEVED') {
+            // Session C: Off Signers During the Month
+            if (!acc['OFF_SIGNERS']) acc['OFF_SIGNERS'] = [];
+            acc['OFF_SIGNERS'].push(member);
+        } else if (rankCategory === 'OFFICERS') {
+            // Session A: Top Rank Crew Members
+            if (!acc['TOP_RANK']) acc['TOP_RANK'] = [];
+            acc['TOP_RANK'].push(member);
+        } else {
+            // Session B: Below Rank Crew Members
+            if (!acc['BELOW_RANK']) acc['BELOW_RANK'] = [];
+            acc['BELOW_RANK'].push(member);
+        }
         return acc;
-    }, {} as Record<string, CrewWithEarnings[]>);
+    }, {} as { [key: string]: CrewWithEarnings[] });
 
     const calculateTotalDeductions = (member: CrewWithEarnings, customValues?: any): number => {
         const values = customValues || editValues[member.earnings?.id || `crew_${member.id}`];
@@ -521,10 +716,11 @@ export default function PortageBill() {
         const fixedOT = parseFloat(String(member.fixed_overtime || 0));
         const leaveWages = parseFloat(String(member.leave_wages || 0));
         const otherAllowance = parseFloat(String(member.other_allowances || 0));
-        const travelWages = parseFloat(String(values?.travel_wages || member.earnings?.travel_wages || 0));
+        // Travel Wages: always read-only from earnings table
+        const travelWages = parseFloat(String(member.earnings?.travel_wages || 0));
         const hra = parseFloat(String(values?.hra || member.earnings?.hra || 0));
         const joiningExp = parseFloat(String(values?.joining_expenses || member.earnings?.joining_expenses || 0));
-        const onboardAllowance = parseFloat(String(member.earnings?.onboard_allowance_short_manning || 0));
+        const onboardAllowance = parseFloat(String(values?.onboard_allowance_short_manning || member.earnings?.onboard_allowance_short_manning || 0));
         
         return basic + fixedOT + leaveWages + otherAllowance + travelWages + hra + joiningExp + onboardAllowance;
     };
@@ -532,19 +728,33 @@ export default function PortageBill() {
     const calculateFinalBalance = (member: CrewWithEarnings, customValues?: any): number => {
         const totalEarnings = calculateTotalEarnings(member, customValues);
         const totalDeductions = calculateTotalDeductions(member, customValues);
-        return totalEarnings - totalDeductions;
+        const broughtForward = parseFloat(String(member.earnings?.brought_forward || 0));
+        return totalEarnings - totalDeductions + broughtForward;
+    };
+
+    const getExitStatusIcon = (exitType: string | null | undefined): string => {
+        if (!exitType) return '✓';
+        const normalExits = ['NORMAL', 'COMPLETION', 'RELIEVED', 'END_OF_CONTRACT', 'NORMAL_RELIEF', 'SUCCESS'];
+        return normalExits.some(type => String(exitType).toUpperCase().includes(type)) ? '✓' : '✗';
+    };
+
+    const getExitStatusColor = (exitType: string | null | undefined): string => {
+        const icon = getExitStatusIcon(exitType);
+        return icon === '✓' ? 'text-green-600' : 'text-red-600';
     };
 
     const renderCrew = (category: string, members: CrewWithEarnings[], startingNumber: number) => {
         return members.map((member, index) => {
             const earningId = member.earnings?.id || `crew_${member.id}`;
+            const isFinalized = finalizedRecords.has(earningId);
             const values = editValues[earningId] || { 
                 cash_drawn: '', 
                 home_allowance: '', 
                 other_deduction: '',
                 travel_wages: '',
                 joining_expenses: '',
-                hra: ''
+                hra: '',
+                onboard_allowance_short_manning: ''
             };
             const isEditing = editingId === earningId;
             const fmToDays = calculateFMTODays(member);
@@ -560,116 +770,125 @@ export default function PortageBill() {
             
             return (
                 <tr key={member.id} className="border-b border-gray-300">
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm font-medium">{startingNumber + index}</td>
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm">{member.name}</td>
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm">{member.rank || '-'}</td>
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-center">{fmToDays.fm}</td>
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-center">{fmToDays.to}</td>
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-center">{fmToDays.days}</td>
-                    {/* Basic Salary - from crew_member, read-only */}
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-right font-medium">{parseFloat(String(member.basic_salary || 0)).toFixed(2)}</td>
-                    {/* Fixed OT - from crew_member, read-only */}
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-right">{parseFloat(String(member.fixed_overtime || 0)).toFixed(2)}</td>
-                    {/* Leave Wages - from crew_member, read-only */}
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-right">{parseFloat(String(member.leave_wages || 0)).toFixed(2)}</td>
-                    {/* Other Allowances - from crew_member, read-only */}
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-right">{parseFloat(String(member.other_allowances || 0)).toFixed(2)}</td>
-                    
-                    {/* Travel Wages - editable only in first month */}
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-right" style={{backgroundColor: firstMonth ? '#E0F2FE' : 'white'}}>
-                        {firstMonth ? (
-                            <input
-                                type="number"
-                                step="0.01"
-                                value={values.travel_wages}
-                                onChange={(e) => updateFieldValue(earningId, 'travel_wages', e.target.value)}
-                                onFocus={() => setEditingId(earningId)}
-                                className="w-full px-1 py-1 border-0 bg-transparent text-right focus:bg-white focus:ring-2 focus:ring-blue-400"
-                            />
-                        ) : (
-                            <div className="px-1 py-1">{parseFloat(getDisplayValue(member.earnings?.travel_wages, member.travel_wages)).toFixed(2)}</div>
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs font-medium">{startingNumber + index}</td>
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs flex items-center gap-2">
+                        {member.name}
+                        {category === 'OFF_SIGNERS' && (
+                            <span className={`text-lg font-bold ${getExitStatusColor(member.exit_type)} cursor-help`} title={`Exit Type: ${member.exit_type || 'N/A'}\nRemarks: ${member.exit_remarks || 'No remarks'}`}>
+                                {getExitStatusIcon(member.exit_type)}
+                            </span>
                         )}
                     </td>
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs">{member.rank || '-'}</td>
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-center">{fmToDays.fm}</td>
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-center">{fmToDays.to}</td>
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-center">{fmToDays.days}</td>
+                    {/* Basic Salary - from crew_member, read-only */}
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-right font-medium">{parseFloat(String(member.basic_salary || 0)).toFixed(2)}</td>
+                    {/* Fixed OT - from crew_member, read-only */}
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-right">{parseFloat(String(member.fixed_overtime || 0)).toFixed(2)}</td>
+                    {/* Leave Wages - from crew_member, read-only */}
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-right">{parseFloat(String(member.leave_wages || 0)).toFixed(2)}</td>
+                    {/* Other Allowances - from crew_member, read-only */}
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-right">{parseFloat(String(member.other_allowances || 0)).toFixed(2)}</td>
                     
-                    {/* HRA - always editable */}
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-right" style={{backgroundColor: '#FEF3C7'}}>
-                        <input
-                            type="number"
-                            step="0.01"
-                            value={values.hra}
-                            onChange={(e) => updateFieldValue(earningId, 'hra', e.target.value)}
-                            onFocus={() => setEditingId(earningId)}
-                            className="w-full px-1 py-1 border-0 bg-transparent text-right focus:bg-white focus:ring-2 focus:ring-blue-400"
-                        />
+                    {/* Travel Wages - read-only, pre-fetched from earnings table */}
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-right bg-gray-50">
+                        <div className="px-1 py-1 cursor-help" title="Travel Wages is pre-fetched from the Travel Wages & HRA screen and is read-only.">
+                            {parseFloat(String(member.earnings?.travel_wages || 0)).toFixed(2)}
+                        </div>
+                    </td>
+                    
+                    {/* HRA - read-only, auto-populated from Travel Wages & HRA screen */}
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-right bg-gray-50">
+                        <div className="px-1 py-1 cursor-help" title="HRA is auto-populated from Travel Wages & HRA screen. To edit HRA, use the Travel Wages & HRA screen.">
+                            {parseFloat(String(member.earnings?.hra || member.hra || 0)).toFixed(2)}
+                        </div>
                     </td>
                     
                     {/* Joining Expenses - editable only in first month */}
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-right" style={{backgroundColor: firstMonth ? '#E0F2FE' : 'white'}}>
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-right" style={{backgroundColor: firstMonth ? '#E0F2FE' : 'white'}}>
                         {firstMonth ? (
                             <input
                                 type="number"
                                 step="0.01"
                                 value={values.joining_expenses}
                                 onChange={(e) => updateFieldValue(earningId, 'joining_expenses', e.target.value)}
-                                onFocus={() => setEditingId(earningId)}
-                                className="w-full px-1 py-1 border-0 bg-transparent text-right focus:bg-white focus:ring-2 focus:ring-blue-400"
+                                onFocus={() => !isFinalized && setEditingId(earningId)}
+                                disabled={isFinalized}
+                                className="w-full px-1 py-1 border-0 bg-transparent text-right focus:bg-white focus:ring-2 focus:ring-blue-400 disabled:opacity-60 disabled:cursor-not-allowed"
                             />
                         ) : (
                             <div className="px-1 py-1">{parseFloat(getDisplayValue(member.earnings?.joining_expenses, member.joining_expenses)).toFixed(2)}</div>
                         )}
                     </td>
                     
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-right">{parseFloat(String(member.earnings?.onboard_allowance_short_manning || 0)).toFixed(2)}</td>
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-right font-semibold bg-gray-200">{calculateTotalEarnings(member).toFixed(2)}</td>
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-right bg-blue-50">
+                        <input
+                            type="number"
+                            step="0.01"
+                            value={values.onboard_allowance_short_manning}
+                            onChange={(e) => updateFieldValue(earningId, 'onboard_allowance_short_manning', e.target.value)}
+                            onFocus={() => !isFinalized && setEditingId(earningId)}
+                            disabled={isFinalized}
+                            className="w-full px-1 py-1 border-0 bg-transparent text-right focus:bg-white focus:ring-2 focus:ring-blue-400 disabled:opacity-60 disabled:cursor-not-allowed"
+                        />
+                    </td>
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-right font-semibold bg-gray-200">{calculateTotalEarnings(member).toFixed(2)}</td>
                     
                     {/* Deductions - Always Editable Text Boxes */}
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-right bg-blue-50">
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-right bg-blue-50">
                         <input
                             type="number"
                             step="0.01"
                             value={values.cash_drawn}
                             onChange={(e) => updateFieldValue(earningId, 'cash_drawn', e.target.value)}
-                            onFocus={() => setEditingId(earningId)}
-                            className="w-full px-1 py-1 border-0 bg-transparent text-right focus:bg-white focus:ring-2 focus:ring-blue-400"
+                            onFocus={() => !isFinalized && setEditingId(earningId)}
+                            disabled={isFinalized}
+                            className="w-full px-1 py-1 border-0 bg-transparent text-right focus:bg-white focus:ring-2 focus:ring-blue-400 disabled:opacity-60 disabled:cursor-not-allowed"
                         />
                     </td>
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-right bg-blue-50">
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-right bg-blue-50">
                         <input
                             type="number"
                             step="0.01"
                             value={values.home_allowance}
                             onChange={(e) => updateFieldValue(earningId, 'home_allowance', e.target.value)}
-                            onFocus={() => setEditingId(earningId)}
-                            className="w-full px-1 py-1 border-0 bg-transparent text-right focus:bg-white focus:ring-2 focus:ring-blue-400"
+                            onFocus={() => !isFinalized && setEditingId(earningId)}
+                            disabled={isFinalized}
+                            className="w-full px-1 py-1 border-0 bg-transparent text-right focus:bg-white focus:ring-2 focus:ring-blue-400 disabled:opacity-60 disabled:cursor-not-allowed"
                         />
                     </td>
                     <td 
-                        className="border-r border-gray-300 px-2 py-1 text-sm text-right bg-blue-50 cursor-help hover:bg-blue-100"
-                        title={`Slopchest Deduction: ₹${parseFloat(String((member as any).slopchest_deduction || 0)).toFixed(2)}`}
+                        className="border-r border-gray-300 px-2 py-1 text-xs text-right bg-blue-50 cursor-help hover:bg-blue-100"
+                        title={`Slopchest Deduction: $${parseFloat(String((member as any).slopchest_deduction || 0)).toFixed(2)}`}
                     >
                         {parseFloat(String(member.earnings?.bond_deduction || 0)).toFixed(2)}
                     </td>
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-right bg-blue-50">
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-right bg-blue-50">
                         <input
                             type="number"
                             step="0.01"
                             value={values.other_deduction}
                             onChange={(e) => updateFieldValue(earningId, 'other_deduction', e.target.value)}
-                            onFocus={() => setEditingId(earningId)}
-                            className="w-full px-1 py-1 border-0 bg-transparent text-right focus:bg-white focus:ring-2 focus:ring-blue-400"
+                            onFocus={() => !isFinalized && setEditingId(earningId)}
+                            disabled={isFinalized}
+                            className="w-full px-1 py-1 border-0 bg-transparent text-right focus:bg-white focus:ring-2 focus:ring-blue-400 disabled:opacity-60 disabled:cursor-not-allowed"
                         />
                     </td>
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-right font-semibold bg-blue-50">
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-right font-semibold bg-blue-50">
                         {calculateTotalDeductions(member).toFixed(2)}
                     </td>
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-right">{parseFloat(String(member.earnings?.brought_forward || 0)).toFixed(2)}</td>
-                    <td className="border-r border-gray-300 px-2 py-1 text-sm text-right font-bold bg-gray-300">
-                        {calculateFinalBalance(member).toFixed(2)}
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-right">{parseFloat(String(member.earnings?.brought_forward || 0)).toFixed(2)}</td>
+                    <td className="border-r border-gray-300 px-2 py-1 text-xs text-right font-bold bg-gray-300">
+                        {parseFloat(calculateFinalBalance(member).toFixed(2)).toFixed(2)}
                     </td>
                     
                     {/* Action Buttons */}
-                    <td className="px-2 py-1 text-sm text-center">
-                        {isEditing ? (
+                    <td className="px-2 py-1 text-xs text-center">
+                        {isFinalized ? (
+                            <span className="text-gray-500 text-xs font-semibold bg-gray-100 px-2 py-1 rounded inline-block">Finalized</span>
+                        ) : isEditing ? (
                             <div className="flex flex-col gap-1">
                                 <div className="flex gap-1 justify-center">
                                     <button
@@ -709,6 +928,59 @@ export default function PortageBill() {
         });
     };
 
+    const exportToExcel = () => {
+        if (!selectedVessel || crewData.length === 0 || !month || !year) {
+            alert('No data to export. Please select a month and year, and ensure crew data is loaded.');
+            return;
+        }
+
+        try {
+            const wb = XLSX.utils.book_new();
+            const sheetData: any[] = [];
+
+            // Header
+            sheetData.push([`${selectedVessel.vessel_name} - PORTAGE BILL - ${getMonthName()} ${year}`]);
+            sheetData.push([]);
+
+            // Session A
+            sheetData.push(['SESSION A - TOP RANK CREW MEMBERS']);
+            sheetData.push(['SR NO', 'NAME', 'RANK', 'FM', 'TO', 'DAYS', 'BASIC', 'FIXED OT', 'LEAVE WAGES', 'OTHER ALLOWANCES', 'TRAVEL WAGES', 'HRA', 'JOINING EXP', 'ONBOARD', 'TOTAL EARNINGS', 'CASH DRAWN', 'HOME ALLOT', 'BOND', 'OTHER DEDUCT', 'TOTAL DEDUCT', 'B/F', 'FINAL BAL']);
+            topRankMembers.forEach((m, i) => {
+                const {fm,to,days} = calculateFMTODays(m);
+                sheetData.push([i+1, m.name, m.rank, fm, to, days, m.basic_salary, m.fixed_overtime, m.leave_wages, m.other_allowances, m.earnings?.travel_wages || 0, m.earnings?.hra || 0, m.earnings?.joining_expenses || 0, m.earnings?.onboard_allowance_short_manning || 0, calculateTotalEarnings(m), m.earnings?.cash_drawn || 0, m.earnings?.home_allowance || 0, m.earnings?.bond_deduction || 0, m.earnings?.other_deduction || 0, calculateTotalDeductions(m), m.earnings?.brought_forward || 0, calculateFinalBalance(m)]);
+            });
+            sheetData.push(['SESSION A TOTAL', '', '', '', '', '', topRankTotals.basic, topRankTotals.fixedOT, topRankTotals.leaveWages, topRankTotals.otherAllowances, topRankTotals.travelWages, topRankTotals.hra, topRankTotals.joiningExp, topRankTotals.onboardAllowance, topRankTotals.totalEarnings, topRankTotals.cashDrawn, topRankTotals.homeAllowance, topRankTotals.bondDeduction, topRankTotals.otherDeduction, topRankTotals.totalDeductions, topRankTotals.broughtForward, topRankTotals.finalBalance]);
+            sheetData.push([]);
+
+            // Session B
+            sheetData.push(['SESSION B - BELOW RANK CREW MEMBERS']);
+            sheetData.push(['SR NO', 'NAME', 'RANK', 'FM', 'TO', 'DAYS', 'BASIC', 'FIXED OT', 'LEAVE WAGES', 'OTHER ALLOWANCES', 'TRAVEL WAGES', 'HRA', 'JOINING EXP', 'ONBOARD', 'TOTAL EARNINGS', 'CASH DRAWN', 'HOME ALLOT', 'BOND', 'OTHER DEDUCT', 'TOTAL DEDUCT', 'B/F', 'FINAL BAL']);
+            belowRankMembers.forEach((m, i) => {
+                const {fm,to,days} = calculateFMTODays(m);
+                sheetData.push([i+1, m.name, m.rank, fm, to, days, m.basic_salary, m.fixed_overtime, m.leave_wages, m.other_allowances, m.earnings?.travel_wages || 0, m.earnings?.hra || 0, m.earnings?.joining_expenses || 0, m.earnings?.onboard_allowance_short_manning || 0, calculateTotalEarnings(m), m.earnings?.cash_drawn || 0, m.earnings?.home_allowance || 0, m.earnings?.bond_deduction || 0, m.earnings?.other_deduction || 0, calculateTotalDeductions(m), m.earnings?.brought_forward || 0, calculateFinalBalance(m)]);
+            });
+            sheetData.push(['SESSION B TOTAL', '', '', '', '', '', belowRankTotals.basic, belowRankTotals.fixedOT, belowRankTotals.leaveWages, belowRankTotals.otherAllowances, belowRankTotals.travelWages, belowRankTotals.hra, belowRankTotals.joiningExp, belowRankTotals.onboardAllowance, belowRankTotals.totalEarnings, belowRankTotals.cashDrawn, belowRankTotals.homeAllowance, belowRankTotals.bondDeduction, belowRankTotals.otherDeduction, belowRankTotals.totalDeductions, belowRankTotals.broughtForward, belowRankTotals.finalBalance]);
+            sheetData.push([]);
+
+            // Session C
+            sheetData.push(['SESSION C - OFF SIGNERS DURING THE MONTH']);
+            sheetData.push(['SR NO', 'NAME', 'RANK', 'FM', 'TO', 'DAYS', 'BASIC', 'FIXED OT', 'LEAVE WAGES', 'OTHER ALLOWANCES', 'TRAVEL WAGES', 'HRA', 'JOINING EXP', 'ONBOARD', 'TOTAL EARNINGS', 'CASH DRAWN', 'HOME ALLOT', 'BOND', 'OTHER DEDUCT', 'TOTAL DEDUCT', 'B/F', 'FINAL BAL']);
+            offSignersMembers.forEach((m, i) => {
+                const {fm,to,days} = calculateFMTODays(m);
+                sheetData.push([i+1, m.name, m.rank, fm, to, days, m.basic_salary, m.fixed_overtime, m.leave_wages, m.other_allowances, m.earnings?.travel_wages || 0, m.earnings?.hra || 0, m.earnings?.joining_expenses || 0, m.earnings?.onboard_allowance_short_manning || 0, calculateTotalEarnings(m), m.earnings?.cash_drawn || 0, m.earnings?.home_allowance || 0, m.earnings?.bond_deduction || 0, m.earnings?.other_deduction || 0, calculateTotalDeductions(m), m.earnings?.brought_forward || 0, calculateFinalBalance(m)]);
+            });
+            sheetData.push(['SESSION C TOTAL', '', '', '', '', '', offSignersTotals.basic, offSignersTotals.fixedOT, offSignersTotals.leaveWages, offSignersTotals.otherAllowances, offSignersTotals.travelWages, offSignersTotals.hra, offSignersTotals.joiningExp, offSignersTotals.onboardAllowance, offSignersTotals.totalEarnings, offSignersTotals.cashDrawn, offSignersTotals.homeAllowance, offSignersTotals.bondDeduction, offSignersTotals.otherDeduction, offSignersTotals.totalDeductions, offSignersTotals.broughtForward, offSignersTotals.finalBalance]);
+
+            const ws = XLSX.utils.aoa_to_sheet(sheetData);
+            XLSX.utils.book_append_sheet(wb, ws, 'Portage Bill');
+            const fileName = `${selectedVessel.vessel_name}_PortageBill_${getMonthName()}_${year}.xlsx`;
+            XLSX.writeFile(wb, fileName);
+        } catch (error) {
+            alert('Error exporting to Excel: ' + (error instanceof Error ? error.message : 'Unknown error'));
+            console.error(error);
+        }
+    };
+
     const calculateCategoryTotals = (members: CrewWithEarnings[]) => {
         return {
             basic: members.reduce((sum, m) => sum + (parseFloat(String(m.basic_salary || 0))), 0),
@@ -730,10 +1002,36 @@ export default function PortageBill() {
         };
     };
 
-    const activeTotals = calculateCategoryTotals(groupedCrew['ACTIVE'] || []);
-    const relievedTotals = calculateCategoryTotals(groupedCrew['RELIEVED'] || []);
-    const activeMembers = groupedCrew['ACTIVE'] || [];
-    const relievedMembers = groupedCrew['RELIEVED'] || [];
+    const topRankTotals = calculateCategoryTotals(groupedCrew['TOP_RANK'] || []);
+    const belowRankTotals = calculateCategoryTotals(groupedCrew['BELOW_RANK'] || []);
+    const offSignersTotals = calculateCategoryTotals(groupedCrew['OFF_SIGNERS'] || []);
+    
+    const topRankMembers = groupedCrew['TOP_RANK'] || [];
+    const belowRankMembers = groupedCrew['BELOW_RANK'] || [];
+    const offSignersMembers = groupedCrew['OFF_SIGNERS'] || [];
+    
+    // For backwards compatibility in other calculations
+    const activeMembers = [...topRankMembers, ...belowRankMembers];
+    const relievedMembers = offSignersMembers;
+    const activeTotals = { 
+        basic: topRankTotals.basic + belowRankTotals.basic,
+        fixedOT: topRankTotals.fixedOT + belowRankTotals.fixedOT,
+        leaveWages: topRankTotals.leaveWages + belowRankTotals.leaveWages,
+        otherAllowances: topRankTotals.otherAllowances + belowRankTotals.otherAllowances,
+        travelWages: topRankTotals.travelWages + belowRankTotals.travelWages,
+        hra: topRankTotals.hra + belowRankTotals.hra,
+        joiningExp: topRankTotals.joiningExp + belowRankTotals.joiningExp,
+        onboardAllowance: topRankTotals.onboardAllowance + belowRankTotals.onboardAllowance,
+        totalEarnings: topRankTotals.totalEarnings + belowRankTotals.totalEarnings,
+        cashDrawn: topRankTotals.cashDrawn + belowRankTotals.cashDrawn,
+        homeAllowance: topRankTotals.homeAllowance + belowRankTotals.homeAllowance,
+        bondDeduction: topRankTotals.bondDeduction + belowRankTotals.bondDeduction,
+        otherDeduction: topRankTotals.otherDeduction + belowRankTotals.otherDeduction,
+        totalDeductions: topRankTotals.totalDeductions + belowRankTotals.totalDeductions,
+        broughtForward: topRankTotals.broughtForward + belowRankTotals.broughtForward,
+        finalBalance: topRankTotals.finalBalance + belowRankTotals.finalBalance,
+    };
+    const relievedTotals = offSignersTotals;
 
     if (!selectedVessel) {
         return (
@@ -746,32 +1044,49 @@ export default function PortageBill() {
     }
 
     return (
-        <div className="space-y-6 p-6">
+        <div className="space-y-4 p-3">
             {/* Header */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                <h1 className="text-3xl font-bold text-gray-900 mb-4">Portage Bill Report</h1>
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3">
+                <h1 className="text-xl font-bold text-gray-900 mb-2">Portage Bill Report</h1>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Month</label>
-                        <input
-                            type="number"
-                            min="1"
-                            max="12"
+                <div className="flex flex-wrap items-end gap-2">
+                    <div className="flex-shrink-0">
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Month</label>
+                        <select
                             value={month}
-                            onChange={(e) => setMonth(String(parseInt(e.target.value) || 0).padStart(2, '0'))}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                        />
+                            onChange={(e) => setMonth(e.target.value)}
+                            className="px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                        >
+                            <option value="">Select</option>
+                            <option value="01">January</option>
+                            <option value="02">February</option>
+                            <option value="03">March</option>
+                            <option value="04">April</option>
+                            <option value="05">May</option>
+                            <option value="06">June</option>
+                            <option value="07">July</option>
+                            <option value="08">August</option>
+                            <option value="09">September</option>
+                            <option value="10">October</option>
+                            <option value="11">November</option>
+                            <option value="12">December</option>
+                        </select>
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Year</label>
+                    <div className="flex-shrink-0">
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Year</label>
                         <input
                             type="number"
                             value={year}
                             onChange={(e) => setYear(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                            className="px-2 py-1 border border-gray-300 rounded text-xs w-20 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                         />
                     </div>
+                    <button
+                        onClick={exportToExcel}
+                        className="px-2 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 font-medium whitespace-nowrap"
+                    >
+                        📊 Export
+                    </button>
                 </div>
             </div>
 
@@ -783,7 +1098,7 @@ export default function PortageBill() {
                             {/* Title */}
                             <thead>
                                 <tr>
-                                    <td colSpan={24} className="text-center font-bold text-lg py-3 bg-blue-600 text-white border border-gray-400">
+                                    <td colSpan={24} className="text-center font-bold text-base py-3 bg-blue-600 text-white border border-gray-400 break-words whitespace-normal">
                                         {selectedVessel.vessel_name} - PORTAGE BILL - MONTH OF {getMonthName()}-{year.slice(-2)}
                                     </td>
                                 </tr>
@@ -808,110 +1123,134 @@ export default function PortageBill() {
                                     <th className="border-r border-gray-300 px-2 py-2 font-bold">FM</th>
                                     <th className="border-r border-gray-300 px-2 py-2 font-bold">TO</th>
                                     <th className="border-r border-gray-300 px-2 py-2 font-bold">DAYS</th>
-                                    <th className="border-r border-gray-300 px-2 py-2 font-bold">BASIC</th>
-                                    <th className="border-r border-gray-300 px-2 py-2 font-bold">FIXED OT</th>
-                                    <th className="border-r border-gray-300 px-2 py-2 font-bold">LEAVE WAGES</th>
-                                    <th className="border-r border-gray-300 px-2 py-2 font-bold">OTHER ALLOWANCES</th>
-                                    <th className="border-r border-gray-300 px-2 py-2 font-bold">Travel Wages</th>
-                                    <th className="border-r border-gray-300 px-2 py-2 font-bold">HRA</th>
-                                    <th className="border-r border-gray-300 px-2 py-2 font-bold">JOINING EXPENSES</th>
-                                    <th className="border-r border-gray-300 px-2 py-2 font-bold">ONBOARD ALLOWANCE / SHORT MANNING</th>
-                                    <th className="border-r border-gray-300 px-2 py-2 font-bold">TOTAL EARNINGS</th>
-                                    <th className="border-r border-gray-300 px-2 py-2 font-bold">CASH DRAWN ON</th>
-                                    <th className="border-r border-gray-300 px-2 py-2 font-bold">HOME ALLOWANCE</th>
-                                    <th className="border-r border-gray-300 px-2 py-2 font-bold">BOND</th>
-                                    <th className="border-r border-gray-300 px-2 py-2 font-bold">OTHER DEDUCTION</th>
-                                    <th className="border-r border-gray-300 px-2 py-2 font-bold">TOTAL DEDUCTION</th>
-                                    <th className="border-r border-gray-300 px-2 py-2 font-bold">BROUGHT FORWARD</th>
-                                    <th className="border-r border-gray-300 px-2 py-2 font-bold">FINAL BALANCE</th>
+                                    <th className="border-r border-gray-300 px-2 py-2 font-bold whitespace-nowrap">BASIC</th>
+                                    <th className="border-r border-gray-300 px-2 py-2 font-bold whitespace-nowrap">FIXED OT</th>
+                                    <th className="border-r border-gray-300 px-2 py-2 font-bold whitespace-nowrap">LEAVE WAGES</th>
+                                    <th className="border-r border-gray-300 px-2 py-2 font-bold whitespace-nowrap">OTHER ALLOWANCES</th>
+                                    <th className="border-r border-gray-300 px-2 py-2 font-bold whitespace-nowrap">Travel Wages</th>
+                                    <th className="border-r border-gray-300 px-2 py-2 font-bold whitespace-nowrap">HRA</th>
+                                    <th className="border-r border-gray-300 px-2 py-2 font-bold whitespace-nowrap">JOINING EXPENSES</th>
+                                    <th className="border-r border-gray-300 px-2 py-2 font-bold whitespace-nowrap" title="ONBOARD ALLOWANCE / SHORT MANNING">ONBOARD ALLOW.</th>
+                                    <th className="border-r border-gray-300 px-2 py-2 font-bold whitespace-nowrap">TOTAL EARNINGS</th>
+                                    <th className="border-r border-gray-300 px-2 py-2 font-bold whitespace-nowrap">CASH DRAWN ON</th>
+                                    <th className="border-r border-gray-300 px-2 py-2 font-bold whitespace-nowrap">HOME ALLOW.</th>
+                                    <th className="border-r border-gray-300 px-2 py-2 font-bold whitespace-nowrap">BOND</th>
+                                    <th className="border-r border-gray-300 px-2 py-2 font-bold whitespace-nowrap">OTHER DEDUCTION</th>
+                                    <th className="border-r border-gray-300 px-2 py-2 font-bold whitespace-nowrap">TOTAL DEDUCTION</th>
+                                    <th className="border-r border-gray-300 px-2 py-2 font-bold whitespace-nowrap">BROUGHT FORWARD</th>
+                                    <th className="border-r border-gray-300 px-2 py-2 font-bold whitespace-nowrap">FINAL BALANCE</th>
                                 </tr>
                             </thead>
 
-                            {/* Active Crew Section */}
+                            {/* Session A: Top Rank Crew Members */}
                             <tbody>
-                                {renderCrew('ACTIVE', activeMembers, 1)}
+                                {renderCrew('TOP_RANK', topRankMembers, 1)}
                                 
-                                {/* Active Crew Totals */}
+                                {/* Session A Totals */}
                                 <tr className="bg-gray-300 font-bold border border-gray-300">
-                                    <td colSpan={6} className="border-r border-gray-300 px-2 py-2 text-right">TOTAL (A)</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{activeTotals.basic.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{activeTotals.fixedOT.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{activeTotals.leaveWages.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{activeTotals.otherAllowances.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{activeTotals.travelWages.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{activeTotals.hra.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{activeTotals.joiningExp.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{activeTotals.onboardAllowance.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{activeTotals.totalEarnings.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{activeTotals.cashDrawn.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{activeTotals.homeAllowance.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{activeTotals.bondDeduction.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{activeTotals.otherDeduction.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{activeTotals.totalDeductions.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{activeTotals.broughtForward.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{activeTotals.finalBalance.toFixed(2)}</td>
+                                    <td colSpan={6} className="border-r border-gray-300 px-2 py-2 text-right">SESSION A - TOTAL</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{topRankTotals.basic.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{topRankTotals.fixedOT.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{topRankTotals.leaveWages.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{topRankTotals.otherAllowances.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{topRankTotals.travelWages.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{topRankTotals.hra.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{topRankTotals.joiningExp.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{topRankTotals.onboardAllowance.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{topRankTotals.totalEarnings.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{topRankTotals.cashDrawn.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{topRankTotals.homeAllowance.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{topRankTotals.bondDeduction.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{topRankTotals.otherDeduction.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{topRankTotals.totalDeductions.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{topRankTotals.broughtForward.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{topRankTotals.finalBalance.toFixed(2)}</td>
                                     <td className="px-2 py-2"></td>
                                 </tr>
 
-                                {/* Relieved Crew Section */}
-                                {renderCrew('RELIEVED', relievedMembers, (activeMembers.length + 1))}
+                                {/* Session B: Below Rank Crew Members */}
+                                {renderCrew('BELOW_RANK', belowRankMembers, (topRankMembers.length + 1))}
                                 
-                                {/* Relieved Crew Totals */}
+                                {/* Session B Totals */}
                                 <tr className="bg-gray-300 font-bold border border-gray-300">
-                                    <td colSpan={6} className="border-r border-gray-300 px-2 py-2 text-right">TOTAL (B)</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{relievedTotals.basic.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{relievedTotals.fixedOT.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{relievedTotals.leaveWages.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{relievedTotals.otherAllowances.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{relievedTotals.travelWages.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{relievedTotals.hra.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{relievedTotals.joiningExp.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{relievedTotals.onboardAllowance.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{relievedTotals.totalEarnings.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{relievedTotals.cashDrawn.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{relievedTotals.homeAllowance.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{relievedTotals.bondDeduction.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{relievedTotals.otherDeduction.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{relievedTotals.totalDeductions.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{relievedTotals.broughtForward.toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{relievedTotals.finalBalance.toFixed(2)}</td>
+                                    <td colSpan={6} className="border-r border-gray-300 px-2 py-2 text-right">SESSION B - TOTAL</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{belowRankTotals.basic.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{belowRankTotals.fixedOT.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{belowRankTotals.leaveWages.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{belowRankTotals.otherAllowances.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{belowRankTotals.travelWages.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{belowRankTotals.hra.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{belowRankTotals.joiningExp.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{belowRankTotals.onboardAllowance.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{belowRankTotals.totalEarnings.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{belowRankTotals.cashDrawn.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{belowRankTotals.homeAllowance.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{belowRankTotals.bondDeduction.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{belowRankTotals.otherDeduction.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{belowRankTotals.totalDeductions.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{belowRankTotals.broughtForward.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{belowRankTotals.finalBalance.toFixed(2)}</td>
+                                    <td className="px-2 py-2"></td>
+                                </tr>
+
+                                {/* Session C: Off Signers During the Month - Heading Row */}
+                                {offSignersMembers.length > 0 && (
+                                    <tr className="bg-yellow-200 font-bold border border-gray-300">
+                                        <td colSpan={24} className="border border-gray-300 px-2 py-3 text-left">
+                                            SESSION C - OFF SIGNERS DURING THE MONTH
+                                        </td>
+                                    </tr>
+                                )}
+                                {renderCrew('OFF_SIGNERS', offSignersMembers, (topRankMembers.length + belowRankMembers.length + 1))}
+                                
+                                {/* Session C Totals */}
+                                <tr className="bg-gray-300 font-bold border border-gray-300">
+                                    <td colSpan={6} className="border-r border-gray-300 px-2 py-2 text-right">SESSION C - TOTAL</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{offSignersTotals.basic.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{offSignersTotals.fixedOT.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{offSignersTotals.leaveWages.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{offSignersTotals.otherAllowances.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{offSignersTotals.travelWages.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{offSignersTotals.hra.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{offSignersTotals.joiningExp.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{offSignersTotals.onboardAllowance.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{offSignersTotals.totalEarnings.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{offSignersTotals.cashDrawn.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{offSignersTotals.homeAllowance.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{offSignersTotals.bondDeduction.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{offSignersTotals.otherDeduction.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{offSignersTotals.totalDeductions.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{offSignersTotals.broughtForward.toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{offSignersTotals.finalBalance.toFixed(2)}</td>
                                     <td className="px-2 py-2"></td>
                                 </tr>
 
                                 {/* Grand Totals */}
                                 <tr className="bg-gray-400 text-white font-bold border border-gray-300">
-                                    <td colSpan={6} className="border-r border-gray-300 px-2 py-2 text-right">TOTAL (A+B)</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(activeTotals.basic + relievedTotals.basic).toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(activeTotals.fixedOT + relievedTotals.fixedOT).toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(activeTotals.leaveWages + relievedTotals.leaveWages).toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(activeTotals.otherAllowances + relievedTotals.otherAllowances).toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(activeTotals.travelWages + relievedTotals.travelWages).toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(activeTotals.hra + relievedTotals.hra).toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(activeTotals.joiningExp + relievedTotals.joiningExp).toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(activeTotals.onboardAllowance + relievedTotals.onboardAllowance).toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(activeTotals.totalEarnings + relievedTotals.totalEarnings).toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(activeTotals.cashDrawn + relievedTotals.cashDrawn).toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(activeTotals.homeAllowance + relievedTotals.homeAllowance).toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(activeTotals.bondDeduction + relievedTotals.bondDeduction).toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(activeTotals.otherDeduction + relievedTotals.otherDeduction).toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(activeTotals.totalDeductions + relievedTotals.totalDeductions).toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(activeTotals.broughtForward + relievedTotals.broughtForward).toFixed(2)}</td>
-                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(activeTotals.finalBalance + relievedTotals.finalBalance).toFixed(2)}</td>
+                                    <td colSpan={6} className="border-r border-gray-300 px-2 py-2 text-right">GRAND TOTAL (A+B+C)</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(topRankTotals.basic + belowRankTotals.basic + offSignersTotals.basic).toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(topRankTotals.fixedOT + belowRankTotals.fixedOT + offSignersTotals.fixedOT).toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(topRankTotals.leaveWages + belowRankTotals.leaveWages + offSignersTotals.leaveWages).toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(topRankTotals.otherAllowances + belowRankTotals.otherAllowances + offSignersTotals.otherAllowances).toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(topRankTotals.travelWages + belowRankTotals.travelWages + offSignersTotals.travelWages).toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(topRankTotals.hra + belowRankTotals.hra + offSignersTotals.hra).toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(topRankTotals.joiningExp + belowRankTotals.joiningExp + offSignersTotals.joiningExp).toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(topRankTotals.onboardAllowance + belowRankTotals.onboardAllowance + offSignersTotals.onboardAllowance).toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(topRankTotals.totalEarnings + belowRankTotals.totalEarnings + offSignersTotals.totalEarnings).toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(topRankTotals.cashDrawn + belowRankTotals.cashDrawn + offSignersTotals.cashDrawn).toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(topRankTotals.homeAllowance + belowRankTotals.homeAllowance + offSignersTotals.homeAllowance).toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(topRankTotals.bondDeduction + belowRankTotals.bondDeduction + offSignersTotals.bondDeduction).toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(topRankTotals.otherDeduction + belowRankTotals.otherDeduction + offSignersTotals.otherDeduction).toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(topRankTotals.totalDeductions + belowRankTotals.totalDeductions + offSignersTotals.totalDeductions).toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(topRankTotals.broughtForward + belowRankTotals.broughtForward + offSignersTotals.broughtForward).toFixed(2)}</td>
+                                    <td className="border-r border-gray-300 px-2 py-2 text-right">{(topRankTotals.finalBalance + belowRankTotals.finalBalance + offSignersTotals.finalBalance).toFixed(2)}</td>
                                     <td className="px-2 py-2"></td>
                                 </tr>
                             </tbody>
                         </table>
                     </div>
 
-                    {/* Print Button */}
-                    <div className="p-4 border-t border-gray-200 bg-gray-50 flex gap-3">
-                        <button
-                            onClick={() => window.print()}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium transition-colors"
-                        >
-                            🖨️ Print Report
-                        </button>
-                    </div>
+
                 </div>
             )}
 

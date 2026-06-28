@@ -17,28 +17,41 @@ export async function GET(request: NextRequest) {
                 );
             }
 
-            const signers = await prisma.slopchestOnSigner.findMany({
+            const allSigners = await prisma.inventoryOnSigner.findMany({
                 where: {
                     vessel_id: vesselId,
                     month: parseInt(month),
                     year: parseInt(year)
                 },
                 include: {
-                    slopchest_items: {
+                    inventory_items: {
                         select: {
                             id: true,
                             item_name: true,
                             item_code: true,
-                            category: true
+                            category: true,
+                            inventory_type: true
                         }
                     }
                 },
                 orderBy: {
-                    signer_name: 'asc'
+                    consumption_date: 'asc'
                 }
             });
 
-            return NextResponse.json(signers);
+            // Filter for SLOPCHEST type only
+            const signers = allSigners.filter(
+                (s) => s.inventory_items?.inventory_type === 'SLOPCHEST'
+            );
+
+            // Flatten the response to include item details at the top level
+            const flattenedSigners = signers.map((signer: typeof signers[0]) => ({
+                ...signer,
+                item_code: signer.inventory_items?.item_code || '',
+                item_name: signer.inventory_items?.item_name || ''
+            }));
+
+            return NextResponse.json(flattenedSigners);
         } catch (error) {
             console.error('Error fetching on-signers:', error);
             return NextResponse.json(
@@ -63,22 +76,40 @@ export async function POST(request: NextRequest) {
                 );
             }
 
-            // Get item details
-            const item = await prisma.slopchestItem.findUnique({
+            // Get item details and verify it belongs to this vessel
+            const item = await prisma.inventoryItem.findUnique({
                 where: { id: parseInt(item_id) }
             });
 
-            if (!item) {
+            if (!item || item.vessel_id !== vesselId) {
                 return NextResponse.json(
-                    { error: 'Item not found' },
+                    { error: 'Item not found or does not belong to this vessel' },
                     { status: 404 }
                 );
             }
 
             const quantityDecimal = parseFloat(quantity);
+            
+            // Validate quantity is not negative
+            if (quantityDecimal < 0) {
+                return NextResponse.json(
+                    { error: 'Quantity cannot be negative' },
+                    { status: 400 }
+                );
+            }
+
+            // Validate quantity does not exceed available quantity
+            const availableQty = parseFloat(item.available_quantity.toString());
+            if (quantityDecimal > availableQty) {
+                return NextResponse.json(
+                    { error: `Insufficient quantity. Available: ${availableQty}, Requested: ${quantityDecimal}` },
+                    { status: 400 }
+                );
+            }
+
             const totalDeduction = quantityDecimal * parseFloat(item.unit_price.toString());
 
-            const signer = await prisma.slopchestOnSigner.create({
+            const signer = await prisma.inventoryOnSigner.create({
                 data: {
                     vessel_id: vesselId,
                     item_id: parseInt(item_id),
@@ -93,7 +124,17 @@ export async function POST(request: NextRequest) {
                     created_by: userId
                 },
                 include: {
-                    slopchest_items: { select: { id: true, item_name: true, item_code: true, category: true } }
+                    inventory_items: { select: { id: true, item_name: true, item_code: true, category: true } }
+                }
+            });
+
+            // Deduct quantity from available inventory
+            await prisma.inventoryItem.update({
+                where: { id: parseInt(item_id) },
+                data: {
+                    available_quantity: {
+                        decrement: quantityDecimal
+                    }
                 }
             });
 

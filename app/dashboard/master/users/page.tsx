@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 interface User {
     id: number;
@@ -29,6 +30,7 @@ interface Roles {
 }
 
 export default function UserManagement() {
+    const router = useRouter();
     const [activeTab, setActiveTab] = useState<'list' | 'create' | 'edit'>('list');
     const [users, setUsers] = useState<User[]>([]);
     const [vessels, setVessels] = useState<Vessel[]>([]);
@@ -37,6 +39,7 @@ export default function UserManagement() {
     const [loading, setLoading] = useState(true);
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [hasAccess, setHasAccess] = useState(false);
     
     const [formData, setFormData] = useState({
         name: '',
@@ -48,8 +51,47 @@ export default function UserManagement() {
     });
 
     useEffect(() => {
-        fetchData();
+        checkAccessAndFetchData();
     }, []);
+
+    const checkAccessAndFetchData = async () => {
+        try {
+            setLoading(true);
+            
+            // First, check if user has admin access by trying to fetch users
+            const usersRes = await fetch('/api/users');
+            
+            // If we get 403 (forbidden), user is not admin
+            if (usersRes.status === 403) {
+                setHasAccess(false);
+                return;
+            }
+            
+            // If we get 401 (unauthorized), redirect to login
+            if (usersRes.status === 401) {
+                router.push('/login');
+                return;
+            }
+            
+            // User has access, proceed with fetching data
+            setHasAccess(true);
+            
+            const [vesselsRes, companiesRes, rolesRes] = await Promise.all([
+                fetch('/api/masters/vessels'),
+                fetch('/api/masters/companies'),
+                fetch('/api/masters/roles')
+            ]);
+
+            if (usersRes.ok) setUsers(await usersRes.json());
+            if (vesselsRes.ok) setVessels(await vesselsRes.json());
+            if (companiesRes.ok) setCompanies(await companiesRes.json());
+            if (rolesRes.ok) setRoles(await rolesRes.json());
+        } catch (error) {
+            console.error('Error checking access or fetching data:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const fetchData = async () => {
         try {
@@ -66,7 +108,6 @@ export default function UserManagement() {
             if (companiesRes.ok) setCompanies(await companiesRes.json());
             if (rolesRes.ok) setRoles(await rolesRes.json());
         } catch (error) {
-            console.error('Error fetching data:', error);
         } finally {
             setLoading(false);
         }
@@ -151,7 +192,6 @@ export default function UserManagement() {
                 alert('Error: ' + (error.error || 'Failed to save user'));
             }
         } catch (error) {
-            console.error('Error saving user:', error);
             alert('Error saving user');
         } finally {
             setIsSubmitting(false);
@@ -173,7 +213,6 @@ export default function UserManagement() {
                 alert('Failed to delete user');
             }
         } catch (error) {
-            console.error('Error deleting user:', error);
             alert('Error deleting user');
         }
     };
@@ -188,6 +227,20 @@ export default function UserManagement() {
             <div className="space-y-6">
                 <h1 className="text-3xl font-bold text-gray-900">User Management</h1>
                 <p className="text-gray-600">Loading...</p>
+            </div>
+        );
+    }
+
+    // Show access denied message if user is not admin
+    if (!hasAccess) {
+        return (
+            <div className="space-y-6">
+                <h1 className="text-3xl font-bold text-gray-900">Access Denied</h1>
+                <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+                    <p className="text-red-800">
+                        You do not have permission to access the User Management screen. Only administrators can manage users.
+                    </p>
+                </div>
             </div>
         );
     }

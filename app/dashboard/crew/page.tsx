@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import { formatDateDDMMYYYY } from '@/lib/formatters';
-import { processContractWithOCR } from '@/lib/ocrUtils';
+import { processContractWithOCR } from '@crewport/ocr-extractor';
 import { useVessel } from '@/app/context/VesselContext';
 
 interface Vessel {
@@ -18,8 +19,10 @@ interface Rank {
 
 interface Port {
     id: number;
-    port_name: string;
-    port_code: string;
+    name: string;
+    code: string;
+    country_code?: string;
+    zone_code?: string;
 }
 
 interface CrewEarning {
@@ -58,6 +61,7 @@ interface CrewMember {
     sign_off_port: string | null;
     exit_type: string | null;
     exit_remarks: string | null;
+    contract_file: string | null;
     crew_earnings: CrewEarning[];
     // Flattened fields for display (from first earnings record)
     basic_salary: number | null;
@@ -88,7 +92,24 @@ export default function CrewManagement() {
     const [userId, setUserId] = useState(1); // MOCK FOR NOW
     const [approvingId, setApprovingId] = useState<number | null>(null);
     const [selectedCrew, setSelectedCrew] = useState<CrewMember | null>(null);
+    const [isEditingCrewDetails, setIsEditingCrewDetails] = useState(false);
     const [isEditingExit, setIsEditingExit] = useState(false);
+    const [crewEditData, setCrewEditData] = useState({
+        name: '',
+        passport_number: '',
+        nationality: '',
+        date_of_birth: '',
+        rank: '',
+        sign_on_date: '',
+        sign_on_port: '',
+        basic_salary: '',
+        fixed_overtime: '',
+        leave_wages: '',
+        other_allowances: '',
+        joining_expenses: '',
+        onboard_allowance_short_manning: ''
+    });
+    const [isCrewDetailsSaving, setIsCrewDetailsSaving] = useState(false);
     const [exitEditData, setExitEditData] = useState({
         sign_off_date: '',
         sign_off_port: '',
@@ -96,6 +117,10 @@ export default function CrewManagement() {
         exit_remarks: ''
     });
     const [isExitSaving, setIsExitSaving] = useState(false);
+    
+    // Sorting states
+    const [sortBy, setSortBy] = useState<'name' | 'passport_number' | 'rank' | null>(null);
+    const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
     
     // Filter states
     const [searchQuery, setSearchQuery] = useState('');
@@ -113,6 +138,11 @@ export default function CrewManagement() {
         joining_expenses: string;
         onboard_allowance_short_manning: string;
     } | null>(null);
+    const [portSearchQuery, setPortSearchQuery] = useState('');
+    const [showPortDropdown, setShowPortDropdown] = useState(false);
+    const [rankSearchQuery, setRankSearchQuery] = useState('');
+    const [showRankDropdown, setShowRankDropdown] = useState(false);
+    const [isOcrDataPopulated, setIsOcrDataPopulated] = useState(false);
 
     const [formData, setFormData] = useState({
         // Personal Info
@@ -126,8 +156,8 @@ export default function CrewManagement() {
         vessel_id: '',
         sign_on_date: new Date().toISOString().split('T')[0],
         sign_on_port: '',
-        sign_off_date: '',
-        sign_off_port: '',
+        contract_duration_months: '',
+        tentative_sign_off_date: '',
         contract_file: null as File | null,
         // Salary Info
         basic_salary: '',
@@ -164,7 +194,7 @@ export default function CrewManagement() {
             }
             if (portsRes.ok) {
                 const portsData = await portsRes.json();
-                setPorts(portsData);
+                setPorts(portsData.data || []);
             }
             if (crewRes.ok) {
                 const crewData = await crewRes.json();
@@ -172,7 +202,7 @@ export default function CrewManagement() {
                 setFilteredCrew(crewData);
             }
         } catch (error) {
-            console.error('Error fetching data:', error);
+            // Error fetching data - handled silently
         } finally {
             setLoading(false);
         }
@@ -186,6 +216,25 @@ export default function CrewManagement() {
         }
         fetchData();
     }, [selectedVessel]);
+
+    // Auto-populate vessel field with selected vessel from context
+    useEffect(() => {
+        if (selectedVessel) {
+            setFormData(prev => ({
+                ...prev,
+                vessel_id: selectedVessel.vessel_id.toString()
+            }));
+            // Auto-filter crew list by selected vessel when in list tab
+            if (activeTab === 'list') {
+                setVesselFilter(selectedVessel.vessel_id.toString());
+            }
+        }
+    }, [selectedVessel, activeTab]);
+
+    // Auto-apply filters when crew data or filter criteria change
+    useEffect(() => {
+        applyFilters();
+    }, [crew, vesselFilter, searchQuery, statusFilter, startDate, endDate]);
 
     const calculateTotalEarnings = (data: typeof formData) => {
         const salaryFields = [
@@ -207,10 +256,104 @@ export default function CrewManagement() {
         return total > 0 ? total.toFixed(2) : '';
     };
 
+    const calculateTentativeSignOffDate = (signOnDate: string, contractMonths: string): string => {
+        if (!signOnDate || !contractMonths) return '';
+        try {
+            const months = parseInt(contractMonths);
+            if (isNaN(months) || months <= 0) return '';
+            
+            const date = new Date(signOnDate);
+            date.setMonth(date.getMonth() + months);
+            return date.toISOString().split('T')[0];
+        } catch {
+            return '';
+        }
+    };
+
+    const isAtLeast18YearsOld = (dobString: string): { valid: boolean; age: number } => {
+        if (!dobString) return { valid: false, age: 0 };
+        
+        try {
+            const dob = new Date(dobString);
+            const today = new Date();
+            let age = today.getFullYear() - dob.getFullYear();
+            
+            // Adjust age if birthday hasn't occurred this year
+            const monthDiff = today.getMonth() - dob.getMonth();
+            if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+                age--;
+            }
+            
+            return { valid: age >= 18, age };
+        } catch {
+            return { valid: false, age: 0 };
+        }
+    };
+
+    const isValidSignOnDate = (dateString: string): { valid: boolean; message: string } => {
+        if (!dateString) return { valid: false, message: 'Sign on date is required' };
+        try {
+            const signOnDate = new Date(dateString);
+            const today = new Date();
+            
+            // Check if date is in the future
+            if (signOnDate > today) {
+                return { valid: false, message: 'Sign on date cannot be a future date' };
+            }
+            
+            // Check if date is in the same month and year
+            if (signOnDate.getFullYear() !== today.getFullYear() || signOnDate.getMonth() !== today.getMonth()) {
+                const monthName = signOnDate.toLocaleString('default', { month: 'long' });
+                const currentMonth = today.toLocaleString('default', { month: 'long' });
+                return { valid: false, message: `Sign on date must be in the current month (${currentMonth}), not ${monthName}` };
+            }
+            
+            return { valid: true, message: '' };
+        } catch {
+            return { valid: false, message: 'Invalid sign on date' };
+        }
+    };
+
+    const getFilteredPorts = () => {
+        if (!portSearchQuery.trim()) return ports;
+        const query = portSearchQuery.toLowerCase();
+        return ports.filter(port => 
+            port.name.toLowerCase().includes(query) || 
+            port.code?.toLowerCase().includes(query)
+        );
+    };
+
+    const getFilteredRanks = () => {
+        if (!rankSearchQuery.trim()) return ranks;
+        const query = rankSearchQuery.toLowerCase();
+        return ranks.filter(rank => 
+            rank.rank_name.toLowerCase().includes(query) || 
+            rank.rank_code?.toLowerCase().includes(query)
+        );
+    };
+
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+        let value = e.target.value;
+        
+        // Phone number validation - only allow digits and + symbol
+        if (e.target.name === 'contact_number') {
+            // Remove any characters that are not digits or + symbol
+            value = value.replace(/[^\d+]/g, '');
+            // Ensure + only appears at the beginning if present
+            if (value.includes('+')) {
+                const plusIndex = value.indexOf('+');
+                if (plusIndex > 0) {
+                    // Remove + from middle and add at beginning
+                    value = '+' + value.replace(/\+/g, '');
+                }
+                // Ensure only one + at the beginning
+                value = '+' + value.replace(/\+/g, '');
+            }
+        }
+
         const newFormData = {
             ...formData,
-            [e.target.name]: e.target.value
+            [e.target.name]: value
         };
 
         // Auto-calculate total earnings if this is a salary field
@@ -219,12 +362,26 @@ export default function CrewManagement() {
             newFormData.total_earnings = calculateTotalEarnings(newFormData);
         }
 
+        // Auto-calculate tentative sign-off date if contract duration or sign-on date changes
+        if (e.target.name === 'contract_duration_months' || e.target.name === 'sign_on_date') {
+            newFormData.tentative_sign_off_date = calculateTentativeSignOffDate(
+                e.target.name === 'sign_on_date' ? e.target.value : newFormData.sign_on_date,
+                e.target.name === 'contract_duration_months' ? e.target.value : newFormData.contract_duration_months
+            );
+        }
+
         setFormData(newFormData);
     };
 
     const handleContractUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
+
+        // Validate vessel is selected
+        if (!selectedVessel) {
+            alert('Please select a vessel first');
+            return;
+        }
 
         // Validate passport number is provided
         if (!formData.passport_number.trim()) {
@@ -236,6 +393,33 @@ export default function CrewManagement() {
         if (!file.type.startsWith('image/')) {
             alert('Please upload an image file (JPG/PNG)');
             return;
+        }
+
+        // Check if OCR data was already populated - warn user
+        if (isOcrDataPopulated) {
+            const shouldClear = window.confirm(
+                'Previous OCR data was found. Uploading a new file will replace the existing populated fields (except Passport Number). Do you want to continue?'
+            );
+            if (!shouldClear) return;
+
+            // Clear previous OCR populated fields but keep Passport Number
+            setFormData(prev => ({
+                ...prev,
+                name: '',
+                date_of_birth: '',
+                nationality: '',
+                basic_salary: '',
+                fixed_overtime: '',
+                leave_wages: '',
+                other_allowances: '',
+                travel_wages: '',
+                hra: '',
+                joining_expenses: '',
+                onboard_allowance_short_manning: '',
+                total_earnings: ''
+            }));
+            setContractFileUrl('');
+            setIsOcrDataPopulated(false);
         }
 
         setFormData({
@@ -252,6 +436,9 @@ export default function CrewManagement() {
 
             const uploadResponse = await fetch('/api/upload', {
                 method: 'POST',
+                headers: {
+                    'X-Vessel-Id': selectedVessel.vessel_id.toString()
+                },
                 body: uploadFormData,
             });
 
@@ -269,35 +456,77 @@ export default function CrewManagement() {
             try {
                 const { text, salaryData, error } = await processContractWithOCR(file);
 
-                if (!error && salaryData) {
-                    // Auto-fill fields with extracted data
-                    const updatedData = {
-                        name: salaryData.full_name ? salaryData.full_name : formData.name,
-                        nationality: salaryData.nationality ? salaryData.nationality : formData.nationality,
-                        basic_salary: salaryData.basic_salary ? String(salaryData.basic_salary) : formData.basic_salary,
-                        fixed_overtime: salaryData.fixed_overtime ? String(salaryData.fixed_overtime) : formData.fixed_overtime,
-                        leave_wages: salaryData.leave_wages ? String(salaryData.leave_wages) : formData.leave_wages,
-                        other_allowances: salaryData.other_allowances ? String(salaryData.other_allowances) : formData.other_allowances,
-                        travel_wages: salaryData.travel_wages ? String(salaryData.travel_wages) : formData.travel_wages,
-                        hra: salaryData.hra ? String(salaryData.hra) : formData.hra,
-                        joining_expenses: salaryData.joining_expenses ? String(salaryData.joining_expenses) : formData.joining_expenses,
-                        onboard_allowance_short_manning: salaryData.onboard_allowance_short_manning ? String(salaryData.onboard_allowance_short_manning) : formData.onboard_allowance_short_manning,
-                    };
+                console.log('[OCR] Extracted data:', salaryData);
+                console.log('[OCR] Error:', error);
 
-                    setFormData(prev => ({
-                        ...prev,
-                        ...updatedData,
-                        total_earnings: calculateTotalEarnings({ ...prev, ...updatedData })
-                    }));
-                    alert('Contract uploaded successfully! Employee details and salary fields have been auto-filled.');
+                if (error || !salaryData) {
+                    // OCR failed or no data extracted
+                    alert('Contract file uploaded successfully. However, OCR could not extract employee data. Please fill in the details manually.');
+                    setIsOcrDataPopulated(false);
+                    return;
                 }
+
+                // Check if salaryData has meaningful contract data
+                // Require: at least ONE personal field (name/DOB/nationality) AND at least ONE salary field
+                const hasPersonalData = !!(
+                    salaryData.full_name ||
+                    salaryData.date_of_birth ||
+                    salaryData.nationality
+                );
+                
+                const hasSalaryData = !!(
+                    salaryData.basic_salary ||
+                    salaryData.fixed_overtime ||
+                    salaryData.leave_wages ||
+                    salaryData.other_allowances ||
+                    salaryData.travel_wages ||
+                    salaryData.hra ||
+                    salaryData.joining_expenses ||
+                    salaryData.onboard_allowance_short_manning
+                );
+
+                // Must have both personal data and salary data to be considered valid contract
+                const hasExtractedData = hasPersonalData && hasSalaryData;
+
+                if (!hasExtractedData) {
+                    alert('Contract file uploaded successfully. However, no employee data could be extracted. Please fill in the details manually.');
+                    setIsOcrDataPopulated(false);
+                    return;
+                }
+
+                // Auto-fill fields with extracted data
+                const updatedData = {
+                    name: salaryData.full_name ? salaryData.full_name : formData.name,
+                    date_of_birth: salaryData.date_of_birth ? salaryData.date_of_birth : formData.date_of_birth,
+                    nationality: salaryData.nationality ? salaryData.nationality : formData.nationality,
+                    basic_salary: salaryData.basic_salary ? String(salaryData.basic_salary) : formData.basic_salary,
+                    fixed_overtime: salaryData.fixed_overtime ? String(salaryData.fixed_overtime) : formData.fixed_overtime,
+                    leave_wages: salaryData.leave_wages ? String(salaryData.leave_wages) : formData.leave_wages,
+                    other_allowances: salaryData.other_allowances ? String(salaryData.other_allowances) : formData.other_allowances,
+                    travel_wages: salaryData.travel_wages ? String(salaryData.travel_wages) : formData.travel_wages,
+                    hra: salaryData.hra ? String(salaryData.hra) : formData.hra,
+                    joining_expenses: salaryData.joining_expenses ? String(salaryData.joining_expenses) : formData.joining_expenses,
+                    onboard_allowance_short_manning: salaryData.onboard_allowance_short_manning ? String(salaryData.onboard_allowance_short_manning) : formData.onboard_allowance_short_manning,
+                };
+
+                console.log('[OCR] Updated form data:', updatedData);
+
+                setFormData(prev => ({
+                    ...prev,
+                    ...updatedData,
+                    total_earnings: calculateTotalEarnings({ ...prev, ...updatedData })
+                }));
+                setIsOcrDataPopulated(true);
+                alert('Contract uploaded successfully! Employee details and salary fields have been auto-filled.');
             } catch (ocrError) {
-                // OCR processing failed, but file was uploaded - continue anyway
-                console.log('OCR processing skipped, but contract file saved');
-                alert('Contract file uploaded successfully. Note: OCR processing will be improved later.');
+                // OCR processing failed
+                console.error('[OCR] Processing error:', ocrError);
+                alert('Contract file uploaded successfully. However, OCR processing failed. Please fill in the employee details manually.');
+                setIsOcrDataPopulated(false);
             }
         } catch (error) {
             alert((error as Error).message || 'Error uploading contract');
+            setIsOcrDataPopulated(false);
         } finally {
             setOcrProcessing(false);
         }
@@ -314,6 +543,24 @@ export default function CrewManagement() {
         if (!formData.vessel_id) {
             alert('Please select a vessel');
             return;
+        }
+
+        // Validate age (at least 18 years old)
+        if (formData.date_of_birth) {
+            const { valid: isValidAge, age } = isAtLeast18YearsOld(formData.date_of_birth);
+            if (!isValidAge) {
+                alert(`Crew member must be at least 18 years old. Current age: ${age} years.`);
+                return;
+            }
+        }
+
+        // Validate sign on date (must be same month and not future date)
+        if (formData.sign_on_date) {
+            const { valid: isValidDate, message } = isValidSignOnDate(formData.sign_on_date);
+            if (!isValidDate) {
+                alert(message);
+                return;
+            }
         }
 
         setIsSubmitLoading(true);
@@ -362,11 +609,11 @@ export default function CrewManagement() {
                 contact_number: '',
                 rank: '',
                 position: '', // Reset position field
-                vessel_id: '',
+                vessel_id: selectedVessel?.vessel_id.toString() || '',
                 sign_on_date: new Date().toISOString().split('T')[0],
                 sign_on_port: '',
-                sign_off_date: '',
-                sign_off_port: '',
+                contract_duration_months: '',
+                tentative_sign_off_date: '',
                 contract_file: null,
                 basic_salary: '',
                 fixed_overtime: '',
@@ -380,6 +627,7 @@ export default function CrewManagement() {
             });
 
             setContractFileUrl('');
+            setIsOcrDataPopulated(false);
         } catch (error) {
             console.error(error);
             alert((error as Error).message || 'Error adding crew member');
@@ -427,7 +675,6 @@ export default function CrewManagement() {
             // Close modal
             setSelectedCrew(null);
         } catch (error) {
-            console.error('Error approving crew member:', error);
             alert((error as Error).message || 'Error approving crew member');
         } finally {
             setApprovingId(null);
@@ -530,10 +777,141 @@ export default function CrewManagement() {
 
             setIsEditingExit(false);
         } catch (error) {
-            console.error('Error updating exit details:', error);
             alert((error as Error).message || 'Error updating exit details');
         } finally {
             setIsExitSaving(false);
+        }
+    };
+
+    const handleEditCrewDetails = () => {
+        if (selectedCrew) {
+            setCrewEditData({
+                name: selectedCrew.name || '',
+                passport_number: selectedCrew.passport_number || '',
+                nationality: selectedCrew.nationality || '',
+                date_of_birth: selectedCrew.date_of_birth ? selectedCrew.date_of_birth.split('T')[0] : '',
+                rank: selectedCrew.rank || '',
+                sign_on_date: selectedCrew.sign_on_date ? selectedCrew.sign_on_date.split('T')[0] : '',
+                sign_on_port: selectedCrew.sign_on_port || '',
+                basic_salary: selectedCrew.basic_salary ? String(selectedCrew.basic_salary) : '',
+                fixed_overtime: selectedCrew.fixed_overtime ? String(selectedCrew.fixed_overtime) : '',
+                leave_wages: selectedCrew.leave_wages ? String(selectedCrew.leave_wages) : '',
+                other_allowances: selectedCrew.other_allowances ? String(selectedCrew.other_allowances) : '',
+                joining_expenses: selectedCrew.joining_expenses ? String(selectedCrew.joining_expenses) : '',
+                onboard_allowance_short_manning: selectedCrew.onboard_allowance_short_manning ? String(selectedCrew.onboard_allowance_short_manning) : ''
+            });
+            setIsEditingCrewDetails(true);
+        }
+    };
+
+    const handleCancelEditCrewDetails = () => {
+        setIsEditingCrewDetails(false);
+        setCrewEditData({
+            name: '',
+            passport_number: '',
+            nationality: '',
+            date_of_birth: '',
+            rank: '',
+            sign_on_date: '',
+            sign_on_port: '',
+            basic_salary: '',
+            fixed_overtime: '',
+            leave_wages: '',
+            other_allowances: '',
+            joining_expenses: '',
+            onboard_allowance_short_manning: ''
+        });
+    };
+
+    const handleSaveCrewDetails = async () => {
+        if (!selectedCrew || !selectedVessel) return;
+
+        // Validate required fields
+        if (!crewEditData.name.trim()) {
+            alert('Please enter crew name');
+            return;
+        }
+
+        setIsCrewDetailsSaving(true);
+        try {
+            const response = await fetch(`/api/crew/${selectedCrew.id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Vessel-Id': selectedVessel.vessel_id.toString()
+                },
+                body: JSON.stringify({
+                    name: crewEditData.name,
+                    passport_number: crewEditData.passport_number,
+                    nationality: crewEditData.nationality,
+                    date_of_birth: crewEditData.date_of_birth,
+                    rank: crewEditData.rank,
+                    sign_on_date: crewEditData.sign_on_date,
+                    sign_on_port: crewEditData.sign_on_port,
+                    basic_salary: crewEditData.basic_salary ? parseFloat(crewEditData.basic_salary) : null,
+                    fixed_overtime: crewEditData.fixed_overtime ? parseFloat(crewEditData.fixed_overtime) : null,
+                    leave_wages: crewEditData.leave_wages ? parseFloat(crewEditData.leave_wages) : null,
+                    other_allowances: crewEditData.other_allowances ? parseFloat(crewEditData.other_allowances) : null,
+                    joining_expenses: crewEditData.joining_expenses ? parseFloat(crewEditData.joining_expenses) : null,
+                    onboard_allowance_short_manning: crewEditData.onboard_allowance_short_manning ? parseFloat(crewEditData.onboard_allowance_short_manning) : null
+                }),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.details || data.error || 'Failed to update crew details');
+            }
+
+            alert('Crew details updated successfully!');
+            
+            // Update the selected crew state
+            setSelectedCrew({
+                ...selectedCrew,
+                name: crewEditData.name,
+                passport_number: crewEditData.passport_number,
+                nationality: crewEditData.nationality,
+                date_of_birth: crewEditData.date_of_birth,
+                rank: crewEditData.rank,
+                sign_on_date: crewEditData.sign_on_date,
+                sign_on_port: crewEditData.sign_on_port,
+                basic_salary: crewEditData.basic_salary ? parseFloat(crewEditData.basic_salary) : null,
+                fixed_overtime: crewEditData.fixed_overtime ? parseFloat(crewEditData.fixed_overtime) : null,
+                leave_wages: crewEditData.leave_wages ? parseFloat(crewEditData.leave_wages) : null,
+                other_allowances: crewEditData.other_allowances ? parseFloat(crewEditData.other_allowances) : null,
+                joining_expenses: crewEditData.joining_expenses ? parseFloat(crewEditData.joining_expenses) : null,
+                onboard_allowance_short_manning: crewEditData.onboard_allowance_short_manning ? parseFloat(crewEditData.onboard_allowance_short_manning) : null
+            });
+
+            // Update crew list
+            const updatedCrew = crew.map(member =>
+                member.id === selectedCrew.id 
+                    ? { 
+                        ...member, 
+                        name: crewEditData.name,
+                        passport_number: crewEditData.passport_number,
+                        nationality: crewEditData.nationality,
+                        date_of_birth: crewEditData.date_of_birth,
+                        rank: crewEditData.rank,
+                        sign_on_date: crewEditData.sign_on_date,
+                        sign_on_port: crewEditData.sign_on_port,
+                        basic_salary: crewEditData.basic_salary ? parseFloat(crewEditData.basic_salary) : null,
+                        fixed_overtime: crewEditData.fixed_overtime ? parseFloat(crewEditData.fixed_overtime) : null,
+                        leave_wages: crewEditData.leave_wages ? parseFloat(crewEditData.leave_wages) : null,
+                        other_allowances: crewEditData.other_allowances ? parseFloat(crewEditData.other_allowances) : null,
+                        joining_expenses: crewEditData.joining_expenses ? parseFloat(crewEditData.joining_expenses) : null,
+                        onboard_allowance_short_manning: crewEditData.onboard_allowance_short_manning ? parseFloat(crewEditData.onboard_allowance_short_manning) : null
+                      }
+                    : member
+            );
+            setCrew(updatedCrew);
+            setFilteredCrew(updatedCrew);
+
+            setIsEditingCrewDetails(false);
+        } catch (error) {
+            alert((error as Error).message || 'Error updating crew details');
+        } finally {
+            setIsCrewDetailsSaving(false);
         }
     };
 
@@ -606,7 +984,95 @@ export default function CrewManagement() {
         setEndDate('');
         setStatusFilter('All');
         setVesselFilter('');
+        setSortBy(null);
+        setSortOrder('asc');
         setFilteredCrew(crew);
+    };
+
+    const handleSort = (column: 'name' | 'passport_number' | 'rank') => {
+        // If clicking the same column, toggle order; otherwise set new column with asc order
+        if (sortBy === column) {
+            setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortBy(column);
+            setSortOrder('asc');
+        }
+    };
+
+    const getSortedCrew = () => {
+        if (!sortBy) return filteredCrew;
+
+        const sorted = [...filteredCrew].sort((a, b) => {
+            let aValue: string;
+            let bValue: string;
+
+            if (sortBy === 'name') {
+                aValue = a.name?.toLowerCase() || '';
+                bValue = b.name?.toLowerCase() || '';
+            } else if (sortBy === 'passport_number') {
+                aValue = (a.passport_number || '').toLowerCase();
+                bValue = (b.passport_number || '').toLowerCase();
+            } else if (sortBy === 'rank') {
+                aValue = (a.rank || '').toLowerCase();
+                bValue = (b.rank || '').toLowerCase();
+            } else {
+                return 0;
+            }
+
+            if (sortOrder === 'asc') {
+                return aValue.localeCompare(bValue);
+            } else {
+                return bValue.localeCompare(aValue);
+            }
+        });
+
+        return sorted;
+    };
+
+    const exportToExcel = () => {
+        const dataToExport = getSortedCrew();
+        
+        if (dataToExport.length === 0) {
+            alert('No crew members to export');
+            return;
+        }
+
+        const exportData = dataToExport.map((member) => ({
+            'Vessel': member.vessels?.vessel_name || '-',
+            'Passport No': member.passport_number || '-',
+            'Name': member.name,
+            'Rank': member.rank || '-',
+            'Nationality': member.nationality || '-',
+            'DOB': member.date_of_birth ? formatDateDDMMYYYY(member.date_of_birth) : '-',
+            'Sign On Date': member.sign_on_date ? formatDateDDMMYYYY(member.sign_on_date) : '-',
+            'Sign On Port': member.sign_on_port || '-',
+            'Sign Off Date': member.sign_off_date ? formatDateDDMMYYYY(member.sign_off_date) : '-',
+            'Sign Off Port': member.sign_off_port || '-',
+            'Status': getCrewStatus(member).status,
+            'Basic Salary': member.basic_salary || '-',
+            'Fixed Overtime': member.fixed_overtime || '-',
+            'Leave Wages': member.leave_wages || '-',
+            'Other Allowances': member.other_allowances || '-',
+            'Travel Wages': member.travel_wages || '-',
+            'HRA': member.hra || '-',
+            'Joining Expenses': member.joining_expenses || '-',
+            'Onboard Allowance': member.onboard_allowance_short_manning || '-',
+            'Total Earnings': member.total_earnings || '-'
+        }));
+
+        const worksheet = XLSX.utils.json_to_sheet(exportData);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Crew Members');
+        
+        // Set column widths
+        worksheet['!cols'] = [
+            { wch: 15 }, { wch: 12 }, { wch: 15 }, { wch: 12 }, { wch: 12 },
+            { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
+            { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 15 },
+            { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 15 }
+        ];
+
+        XLSX.writeFile(workbook, `Crew_Members_${new Date().getTime()}.xlsx`);
     };
 
     const openCrewDetails = (member: CrewMember) => {
@@ -693,7 +1159,6 @@ export default function CrewManagement() {
             setFilteredCrew(updatedCrew);
             setSelectedCrew(updatedCrew.find(m => m.id === selectedCrew.id) || null);
         } catch (error) {
-            console.error('Error saving salary details:', error);
             alert((error as Error).message || 'Error saving salary details');
         }
     };
@@ -781,13 +1246,29 @@ export default function CrewManagement() {
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Date of Birth</label>
-                                <input
-                                    type="date"
-                                    name="date_of_birth"
-                                    value={formData.date_of_birth}
-                                    onChange={handleChange}
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                />
+                                <div>
+                                    <input
+                                        type="date"
+                                        name="date_of_birth"
+                                        value={formData.date_of_birth}
+                                        onChange={handleChange}
+                                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                                    />
+                                    {formData.date_of_birth && (
+                                        (() => {
+                                            const { valid: isValidAge, age } = isAtLeast18YearsOld(formData.date_of_birth);
+                                            return (
+                                                <p className={`mt-1 text-xs font-medium ${isValidAge ? 'text-green-600' : 'text-red-600'}`}>
+                                                    {isValidAge ? (
+                                                        <>✓ Age: {age} years (Valid)</>
+                                                    ) : (
+                                                        <>✗ Age: {age} years (Must be 18+)</>
+                                                    )}
+                                                </p>
+                                            );
+                                        })()
+                                    )}
+                                </div>
                             </div>
                         </div>
 
@@ -795,17 +1276,59 @@ export default function CrewManagement() {
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Rank</label>
-                                <select
-                                    name="rank"
-                                    value={formData.rank}
-                                    onChange={handleChange}
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                >
-                                    <option value="">Select Rank</option>
-                                    {ranks.map(r => (
-                                        <option key={r.id} value={r.rank_name}>{r.rank_name}</option>
-                                    ))}
-                                </select>
+                                <div className="relative">
+                                    <input
+                                        type="text"
+                                        placeholder="Search rank by name or code..."
+                                        value={formData.rank === '' ? rankSearchQuery : (rankSearchQuery || formData.rank)}
+                                        onChange={(e) => {
+                                            setRankSearchQuery(e.target.value);
+                                            setShowRankDropdown(true);
+                                        }}
+                                        onFocus={() => setShowRankDropdown(true)}
+                                        onBlur={() => setTimeout(() => setShowRankDropdown(false), 200)}
+                                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                                    />
+                                    {showRankDropdown && getFilteredRanks().length > 0 && (
+                                        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                                            {getFilteredRanks().map(rank => (
+                                                <button
+                                                    key={rank.id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setFormData(prev => ({
+                                                            ...prev,
+                                                            rank: rank.rank_name
+                                                        }));
+                                                        setRankSearchQuery('');
+                                                        setShowRankDropdown(false);
+                                                    }}
+                                                    className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm transition-colors"
+                                                >
+                                                    <div className="font-medium">{rank.rank_code} | {rank.rank_name}</div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {formData.rank && (
+                                        <div className="mt-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-md text-sm text-blue-700">
+                                            Selected: <strong>{formData.rank}</strong>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setFormData(prev => ({
+                                                        ...prev,
+                                                        rank: ''
+                                                    }));
+                                                    setRankSearchQuery('');
+                                                }}
+                                                className="ml-2 text-blue-600 hover:text-blue-800 text-xs font-semibold"
+                                            >
+                                                Clear
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Position</label>
@@ -820,204 +1343,298 @@ export default function CrewManagement() {
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Contact Number</label>
-                                <input
-                                    type="text"
-                                    name="contact_number"
-                                    value={formData.contact_number}
-                                    onChange={handleChange}
-                                    placeholder="Phone Number"
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                />
+                                <div>
+                                    <input
+                                        type="text"
+                                        name="contact_number"
+                                        value={formData.contact_number}
+                                        onChange={handleChange}
+                                        placeholder="e.g., +91 9876543210 or 9876543210"
+                                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                                    />
+                                    <p className="mt-1 text-xs text-gray-500">Only digits and '+' symbol allowed (e.g., +919876543210)</p>
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Vessel *</label>
-                                <select
-                                    name="vessel_id"
-                                    required
-                                    value={formData.vessel_id}
-                                    onChange={handleChange}
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                >
-                                    <option value="">Select Vessel</option>
-                                    {vessels.map(v => (
-                                        <option key={v.id} value={v.id}>{v.vessel_name}</option>
-                                    ))}
-                                </select>
+                                {selectedVessel ? (
+                                    <div className="mt-1 px-3 py-2 border border-gray-300 rounded-md bg-blue-50 text-gray-900 text-sm font-medium flex items-center justify-between">
+                                        <span>{selectedVessel.vessel_name}</span>
+                                        <span className="text-xs text-blue-600 font-semibold">Auto-selected</span>
+                                    </div>
+                                ) : (
+                                    <select
+                                        name="vessel_id"
+                                        required
+                                        value={formData.vessel_id}
+                                        onChange={handleChange}
+                                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                                    >
+                                        <option value="">Select Vessel</option>
+                                        {vessels.map(v => (
+                                            <option key={v.id} value={v.id}>{v.vessel_name}</option>
+                                        ))}
+                                    </select>
+                                )}
                             </div>
                         </div>
 
-                        {/* Row 3: Sign On Date, Sign On Port, Sign Off Date, Sign Off Port */}
+                        {/* Row 3: Sign On Date, Sign On Port, Contract Duration, Tentative Sign Off Date */}
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Sign On Date</label>
-                                <input
-                                    type="date"
-                                    name="sign_on_date"
-                                    value={formData.sign_on_date}
-                                    onChange={handleChange}
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                />
+                                <div>
+                                    <input
+                                        type="date"
+                                        name="sign_on_date"
+                                        value={formData.sign_on_date}
+                                        onChange={handleChange}
+                                        className={`mt-1 block w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
+                                            formData.sign_on_date 
+                                                ? isValidSignOnDate(formData.sign_on_date).valid 
+                                                    ? 'border-green-300' 
+                                                    : 'border-red-300'
+                                                : 'border-gray-300'
+                                        }`}
+                                    />
+                                    {formData.sign_on_date && (
+                                        (() => {
+                                            const { valid, message } = isValidSignOnDate(formData.sign_on_date);
+                                            return (
+                                                <p className={`mt-1 text-xs font-medium ${valid ? 'text-green-600' : 'text-red-600'}`}>
+                                                    {valid ? '✓ Valid date' : `✗ ${message}`}
+                                                </p>
+                                            );
+                                        })()
+                                    )}
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Sign On Port</label>
-                                <select
-                                    name="sign_on_port"
-                                    value={formData.sign_on_port}
-                                    onChange={handleChange}
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                >
-                                    <option value="">Select Port</option>
-                                    {ports.map(p => (
-                                        <option key={p.id} value={p.port_name}>{p.port_name}</option>
-                                    ))}
-                                </select>
+                                <div className="relative">
+                                    <input
+                                        type="text"
+                                        placeholder="Search port..."
+                                        value={formData.sign_on_port === '' ? portSearchQuery : (portSearchQuery || formData.sign_on_port)}
+                                        onChange={(e) => {
+                                            setPortSearchQuery(e.target.value);
+                                            setShowPortDropdown(true);
+                                        }}
+                                        onFocus={() => setShowPortDropdown(true)}
+                                        onBlur={() => setTimeout(() => setShowPortDropdown(false), 200)}
+                                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                                    />
+                                    {showPortDropdown && getFilteredPorts().length > 0 && (
+                                        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                                            {getFilteredPorts().map(port => (
+                                                <button
+                                                    key={port.id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setFormData(prev => ({
+                                                            ...prev,
+                                                            sign_on_port: port.name
+                                                        }));
+                                                        setPortSearchQuery('');
+                                                        setShowPortDropdown(false);
+                                                    }}
+                                                    className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm transition-colors"
+                                                >
+                                                    <div className="font-medium">{port.name}</div>
+                                                    {port.code && <div className="text-xs text-gray-500">{port.code}</div>}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {formData.sign_on_port && (
+                                        <div className="mt-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-md text-sm text-blue-700">
+                                            Selected: <strong>{formData.sign_on_port}</strong>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setFormData(prev => ({
+                                                        ...prev,
+                                                        sign_on_port: ''
+                                                    }));
+                                                    setPortSearchQuery('');
+                                                }}
+                                                className="ml-2 text-blue-600 hover:text-blue-800 text-xs font-semibold"
+                                            >
+                                                Clear
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700">Sign Off Date</label>
+                                <label className="block text-sm font-medium text-gray-700">Contract Duration (Months) *</label>
                                 <input
-                                    type="date"
-                                    name="sign_off_date"
-                                    value={formData.sign_off_date}
+                                    type="number"
+                                    name="contract_duration_months"
+                                    value={formData.contract_duration_months}
                                     onChange={handleChange}
+                                    min="1"
+                                    placeholder="e.g., 12"
                                     className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700">Sign Off Port</label>
-                                <select
-                                    name="sign_off_port"
-                                    value={formData.sign_off_port}
-                                    onChange={handleChange}
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                >
-                                    <option value="">Select Port</option>
-                                    {ports.map(p => (
-                                        <option key={p.id} value={p.port_name}>{p.port_name}</option>
-                                    ))}
-                                </select>
+                                <label className="block text-sm font-medium text-gray-700">Tentative Sign Off Date</label>
+                                <input
+                                    type="date"
+                                    name="tentative_sign_off_date"
+                                    value={formData.tentative_sign_off_date}
+                                    readOnly
+                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-gray-700 cursor-not-allowed sm:text-sm"
+                                />
                             </div>
                         </div>
                     </div>
-
-
 
                     {/* SALARY SECTION */}
                     <div>
                         <h4 className="text-md font-semibold text-gray-800 mb-4">Salary</h4>
                         
-                        {/* Row 1: Basic, Fixed OT, Leave Wages, Other Allowances, Travel Wages */}
+                        {/* Row 1: Basic, Fixed OT, Leave Wages, Other Allowances, Total Earnings */}
                         <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Basic</label>
-                                <input
-                                    type="number"
-                                    name="basic_salary"
-                                    value={formData.basic_salary}
-                                    onChange={handleChange}
-                                    placeholder="0.00"
-                                    step="0.01"
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                />
+                                <div className="relative mt-1">
+                                    <span className="absolute left-3 top-2 text-gray-600 font-medium">$</span>
+                                    <input
+                                        type="number"
+                                        name="basic_salary"
+                                        value={formData.basic_salary}
+                                        onChange={handleChange}
+                                        placeholder="0.00"
+                                        step="0.01"
+                                        className="block w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                                    />
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Fixed OT</label>
-                                <input
-                                    type="number"
-                                    name="fixed_overtime"
-                                    value={formData.fixed_overtime}
-                                    onChange={handleChange}
-                                    placeholder="0.00"
-                                    step="0.01"
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                />
+                                <div className="relative mt-1">
+                                    <span className="absolute left-3 top-2 text-gray-600 font-medium">$</span>
+                                    <input
+                                        type="number"
+                                        name="fixed_overtime"
+                                        value={formData.fixed_overtime}
+                                        onChange={handleChange}
+                                        placeholder="0.00"
+                                        step="0.01"
+                                        className="block w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                                    />
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Leave Wages</label>
-                                <input
-                                    type="number"
-                                    name="leave_wages"
-                                    value={formData.leave_wages}
-                                    onChange={handleChange}
-                                    placeholder="0.00"
-                                    step="0.01"
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                />
+                                <div className="relative mt-1">
+                                    <span className="absolute left-3 top-2 text-gray-600 font-medium">$</span>
+                                    <input
+                                        type="number"
+                                        name="leave_wages"
+                                        value={formData.leave_wages}
+                                        onChange={handleChange}
+                                        placeholder="0.00"
+                                        step="0.01"
+                                        className="block w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                                    />
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Other Allowances</label>
-                                <input
-                                    type="number"
-                                    name="other_allowances"
-                                    value={formData.other_allowances}
-                                    onChange={handleChange}
-                                    placeholder="0.00"
-                                    step="0.01"
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700">Travel Wages</label>
-                                <input
-                                    type="number"
-                                    name="travel_wages"
-                                    value={formData.travel_wages}
-                                    onChange={handleChange}
-                                    placeholder="0.00"
-                                    step="0.01"
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                />
-                            </div>
-                        </div>
-
-                        {/* Row 2: HRA, Joining Exp, Onboard Allowance, Total Earnings */}
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700">HRA</label>
-                                <input
-                                    type="number"
-                                    name="hra"
-                                    value={formData.hra}
-                                    onChange={handleChange}
-                                    placeholder="0.00"
-                                    step="0.01"
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700">Joining Exp</label>
-                                <input
-                                    type="number"
-                                    name="joining_expenses"
-                                    value={formData.joining_expenses}
-                                    onChange={handleChange}
-                                    placeholder="0.00"
-                                    step="0.01"
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700">Onboard Allowance / Short Manning</label>
-                                <input
-                                    type="number"
-                                    name="onboard_allowance_short_manning"
-                                    value={formData.onboard_allowance_short_manning}
-                                    onChange={handleChange}
-                                    placeholder="0.00"
-                                    step="0.01"
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                />
+                                <div className="relative mt-1">
+                                    <span className="absolute left-3 top-2 text-gray-600 font-medium">$</span>
+                                    <input
+                                        type="number"
+                                        name="other_allowances"
+                                        value={formData.other_allowances}
+                                        onChange={handleChange}
+                                        placeholder="0.00"
+                                        step="0.01"
+                                        className="block w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                                    />
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Total Earnings (Auto)</label>
-                                <input
-                                    type="number"
-                                    name="total_earnings"
-                                    value={formData.total_earnings}
-                                    readOnly
-                                    placeholder="0.00"
-                                    step="0.01"
-                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-gray-700 cursor-not-allowed sm:text-sm"
-                                />
+                                <div className="relative mt-1">
+                                    <span className="absolute left-3 top-2 text-gray-600 font-medium">$</span>
+                                    <input
+                                        type="number"
+                                        name="total_earnings"
+                                        value={formData.total_earnings}
+                                        readOnly
+                                        placeholder="0.00"
+                                        step="0.01"
+                                        className="block w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-gray-700 cursor-not-allowed sm:text-sm"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Row 2: Travel Wages (Display), HRA (Display), Joining Exp, Onboard Allowance */}
+                        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Travel Wages</label>
+                                <div className="relative mt-1">
+                                    <span className="absolute left-3 top-2 text-gray-600 font-medium">$</span>
+                                    <input
+                                        type="number"
+                                        name="travel_wages"
+                                        value={formData.travel_wages}
+                                        readOnly
+                                        placeholder="0.00"
+                                        step="0.01"
+                                        className="block w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-gray-700 cursor-not-allowed sm:text-sm"
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">HRA</label>
+                                <div className="relative mt-1">
+                                    <span className="absolute left-3 top-2 text-gray-600 font-medium">$</span>
+                                    <input
+                                        type="number"
+                                        name="hra"
+                                        value={formData.hra}
+                                        readOnly
+                                        placeholder="0.00"
+                                        step="0.01"
+                                        className="block w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-gray-700 cursor-not-allowed sm:text-sm"
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Joining Exp</label>
+                                <div className="relative mt-1">
+                                    <span className="absolute left-3 top-2 text-gray-600 font-medium">$</span>
+                                    <input
+                                        type="number"
+                                        name="joining_expenses"
+                                        value={formData.joining_expenses}
+                                        onChange={handleChange}
+                                        placeholder="0.00"
+                                        step="0.01"
+                                        className="block w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Onboard Allowance / Short Manning</label>
+                                <div className="relative mt-1">
+                                    <span className="absolute left-3 top-2 text-gray-600 font-medium">$</span>
+                                    <input
+                                        type="number"
+                                        name="onboard_allowance_short_manning"
+                                        value={formData.onboard_allowance_short_manning}
+                                        onChange={handleChange}
+                                        placeholder="0.00"
+                                        step="0.01"
+                                        className="block w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                                    />
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1026,7 +1643,7 @@ export default function CrewManagement() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
                             <h4 className="text-md font-semibold text-gray-800 mb-4">Contract Document</h4>
-                            <p className="text-sm text-gray-600 mb-4">💡 Tip: Upload a contract image to auto-fill Full Name, Nationality, Leave Wages and all salary fields using OCR</p>
+                            <p className="text-sm text-gray-600 mb-4">💡 Tip: Upload a contract image to auto-fill Full Name, Date of Birth, Nationality, and all salary fields using OCR</p>
                             <label className="block text-sm font-medium text-gray-700 mb-2">Upload Contract Copy</label>
                             <div className="flex flex-col gap-2">
                                 <input
@@ -1106,16 +1723,22 @@ export default function CrewManagement() {
                         {/* Vessel Filter */}
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Vessel</label>
-                            <select
-                                value={vesselFilter}
-                                onChange={(e) => setVesselFilter(e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                            >
-                                <option value="">All Vessels</option>
-                                {vessels.map(vessel => (
-                                    <option key={vessel.id} value={vessel.id.toString()}>{vessel.vessel_name}</option>
-                                ))}
-                            </select>
+                            <div className="relative">
+                                <select
+                                    value={vesselFilter}
+                                    onChange={(e) => setVesselFilter(e.target.value)}
+                                    disabled={!!selectedVessel}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm disabled:bg-gray-100 disabled:text-gray-700"
+                                >
+                                    <option value="">All Vessels</option>
+                                    {vessels.map(vessel => (
+                                        <option key={vessel.id} value={vessel.id.toString()}>{vessel.vessel_name}</option>
+                                    ))}
+                                </select>
+                                {selectedVessel && (
+                                    <span className="absolute right-10 top-2 text-xs text-blue-600 font-semibold">Auto-filtered</span>
+                                )}
+                            </div>
                         </div>
 
                         {/* Start Date */}
@@ -1171,6 +1794,12 @@ export default function CrewManagement() {
                         >
                             Apply Filters
                         </button>
+                        <button
+                            onClick={exportToExcel}
+                            className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium text-sm transition-colors"
+                        >
+                            📥 Download Excel
+                        </button>
                         <span className="ml-auto text-sm text-gray-600 py-2">
                             Showing {filteredCrew.length} of {crew.length} crew member(s)
                         </span>
@@ -1188,11 +1817,27 @@ export default function CrewManagement() {
                         <thead className="bg-white">
                             <tr>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vessel</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Passport No</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rank</th>
+                                <th 
+                                    onClick={() => handleSort('passport_number')}
+                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                                >
+                                    Passport No {sortBy === 'passport_number' && (sortOrder === 'asc' ? '↑' : '↓')}
+                                </th>
+                                <th 
+                                    onClick={() => handleSort('name')}
+                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                                >
+                                    Name {sortBy === 'name' && (sortOrder === 'asc' ? '↑' : '↓')}
+                                </th>
+                                <th 
+                                    onClick={() => handleSort('rank')}
+                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                                >
+                                    Rank {sortBy === 'rank' && (sortOrder === 'asc' ? '↑' : '↓')}
+                                </th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sign On Date</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sign Off Date</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contract</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                 {userRole === 'ADMIN' && (
                                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
@@ -1202,18 +1847,18 @@ export default function CrewManagement() {
                         <tbody className="bg-white divide-y divide-gray-200">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={userRole === 'ADMIN' ? 8 : 7} className="px-6 py-4 text-center text-sm text-gray-500">
+                                    <td colSpan={userRole === 'ADMIN' ? 9 : 8} className="px-6 py-4 text-center text-sm text-gray-500">
                                         Loading crew data...
                                     </td>
                                 </tr>
                             ) : filteredCrew.length === 0 ? (
                                 <tr>
-                                    <td colSpan={userRole === 'ADMIN' ? 8 : 7} className="px-6 py-4 text-center text-sm text-gray-500">
+                                    <td colSpan={userRole === 'ADMIN' ? 9 : 8} className="px-6 py-4 text-center text-sm text-gray-500">
                                         No crew records found.
                                     </td>
                                 </tr>
                             ) : (
-                                filteredCrew.map(member => (
+                                getSortedCrew().map(member => (
                                     <tr key={member.id} className="hover:bg-gray-50">
                                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                             {member.vessels?.vessel_name || '-'}
@@ -1249,6 +1894,21 @@ export default function CrewManagement() {
                                                     )}
                                                 </div>
                                             ) : '-'}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
+                                            {member.contract_file ? (
+                                                <a
+                                                    href={member.contract_file}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    title="Download contract"
+                                                    className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                                                >
+                                                    📄 View
+                                                </a>
+                                            ) : (
+                                                <span className="text-gray-400 text-xs">-</span>
+                                            )}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             {(() => {
@@ -1302,32 +1962,157 @@ export default function CrewManagement() {
                         <div className="p-6 space-y-6">
                             {/* Personal Info Section */}
                             <div>
-                                <h3 className="text-lg font-semibold text-gray-900 mb-4 pb-2 border-b border-gray-200">Personal Information</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <p className="text-sm font-medium text-gray-600">Passport Number</p>
-                                        <p className="text-base text-gray-900 font-semibold">{selectedCrew.passport_number || '-'}</p>
+                                <div className="flex justify-between items-center mb-4 pb-2 border-b border-gray-200">
+                                    <h3 className="text-lg font-semibold text-gray-900">Personal Information</h3>
+                                    {!isEditingCrewDetails && selectedCrew.crew_status === 'NEW' && userRole === 'ADMIN' && (
+                                        <button
+                                            onClick={handleEditCrewDetails}
+                                            className="px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 font-medium transition-colors"
+                                        >
+                                            Edit Details
+                                        </button>
+                                    )}
+                                </div>
+                                {isEditingCrewDetails ? (
+                                    <div className="space-y-4 p-4 bg-blue-50 rounded-md border border-blue-200">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Passport Number *</label>
+                                                <input
+                                                    type="text"
+                                                    value={crewEditData.passport_number}
+                                                    onChange={(e) => setCrewEditData({...crewEditData, passport_number: e.target.value})}
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                                                <input
+                                                    type="text"
+                                                    value={crewEditData.name}
+                                                    onChange={(e) => setCrewEditData({...crewEditData, name: e.target.value})}
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Rank</label>
+                                                <input
+                                                    type="text"
+                                                    value={crewEditData.rank}
+                                                    onChange={(e) => setCrewEditData({...crewEditData, rank: e.target.value})}
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Nationality</label>
+                                                <input
+                                                    type="text"
+                                                    value={crewEditData.nationality}
+                                                    onChange={(e) => setCrewEditData({...crewEditData, nationality: e.target.value})}
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label>
+                                                <input
+                                                    type="date"
+                                                    value={crewEditData.date_of_birth}
+                                                    onChange={(e) => setCrewEditData({...crewEditData, date_of_birth: e.target.value})}
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Sign On Port</label>
+                                                <input
+                                                    type="text"
+                                                    value={crewEditData.sign_on_port}
+                                                    onChange={(e) => setCrewEditData({...crewEditData, sign_on_port: e.target.value})}
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Sign On Date</label>
+                                                <input
+                                                    type="date"
+                                                    value={crewEditData.sign_on_date}
+                                                    onChange={(e) => setCrewEditData({...crewEditData, sign_on_date: e.target.value})}
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-2 pt-4">
+                                            <button
+                                                onClick={handleSaveCrewDetails}
+                                                disabled={isCrewDetailsSaving}
+                                                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-green-400 font-medium text-sm transition-colors disabled:cursor-not-allowed"
+                                            >
+                                                {isCrewDetailsSaving ? 'Saving...' : 'Save'}
+                                            </button>
+                                            <button
+                                                onClick={handleCancelEditCrewDetails}
+                                                disabled={isCrewDetailsSaving}
+                                                className="px-4 py-2 bg-gray-400 text-white rounded-md hover:bg-gray-500 disabled:bg-gray-300 font-medium text-sm transition-colors disabled:cursor-not-allowed"
+                                            >
+                                                Cancel
+                                            </button>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <p className="text-sm font-medium text-gray-600">Name</p>
-                                        <p className="text-base text-gray-900 font-semibold">{selectedCrew.name}</p>
+                                ) : (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <p className="text-sm font-medium text-gray-600">Passport Number</p>
+                                            <p className="text-base text-gray-900 font-semibold">{selectedCrew.passport_number || '-'}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-medium text-gray-600">Name</p>
+                                            <p className="text-base text-gray-900 font-semibold">{selectedCrew.name}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-medium text-gray-600">Rank</p>
+                                            <p className="text-base text-gray-900">{selectedCrew.rank || '-'}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-medium text-gray-600">Nationality</p>
+                                            <p className="text-base text-gray-900">{selectedCrew.nationality || '-'}</p>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <p className="text-sm font-medium text-gray-600">Rank</p>
-                                        <p className="text-base text-gray-900">{selectedCrew.rank || '-'}</p>
-                                    </div>
-                                    <div>
-                                        <p className="text-sm font-medium text-gray-600">Nationality</p>
-                                        <p className="text-base text-gray-900">{selectedCrew.nationality || '-'}</p>
+                                )}
+                            </div>
+
+                            {/* Contract File Section */}
+                            {selectedCrew.contract_file && (
+                                <div>
+                                    <h3 className="text-lg font-semibold text-gray-900 mb-4 pb-2 border-b border-gray-200">Contract Document</h3>
+                                    <div className="p-4 bg-blue-50 rounded-md border border-blue-200">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className="text-2xl">📄</div>
+                                                <div>
+                                                    <p className="text-sm font-medium text-gray-600">Contract File</p>
+                                                    <p className="text-base text-gray-900 font-semibold break-all">
+                                                        {selectedCrew.contract_file.split('/').pop()}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <a
+                                                href={selectedCrew.contract_file}
+                                                download
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium text-sm transition-colors whitespace-nowrap"
+                                            >
+                                                📥 Download
+                                            </a>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
+                            )}
 
                             {/* Sign On/Off Section */}
                             <div>
                                 <div className="flex justify-between items-center mb-4 pb-2 border-b border-gray-200">
                                     <h3 className="text-lg font-semibold text-gray-900">Employment Period</h3>
-                                    {!isEditingExit && selectedCrew.crew_status !== 'COMPLETED' && (
+                                    {!isEditingExit && selectedCrew.crew_status !== 'COMPLETED' && selectedCrew.onboarding_status === 'APPROVED' && (
                                         <button
                                             onClick={handleEditExit}
                                             className="px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 font-medium transition-colors"
@@ -1371,7 +2156,7 @@ export default function CrewManagement() {
                                                     >
                                                         <option value="">Select Port</option>
                                                         {ports.map(port => (
-                                                            <option key={port.id} value={port.port_name}>{port.port_name}</option>
+                                                            <option key={port.id} value={port.name}>{port.name}</option>
                                                         ))}
                                                     </select>
                                                 </div>
@@ -1456,46 +2241,129 @@ export default function CrewManagement() {
                             {/* Salary Details Section */}
                             <div>
                                 <h3 className="text-lg font-semibold text-gray-900 mb-4 pb-2 border-b border-gray-200">Salary Details</h3>
-                                <div className="space-y-3">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="p-3 bg-gray-50 rounded-md">
-                                            <p className="text-sm font-medium text-gray-600">Basic Salary</p>
-                                            <p className="text-base text-gray-900 font-semibold">{selectedCrew.basic_salary ? `${parseFloat(String(selectedCrew.basic_salary)).toFixed(2)}` : '-'}</p>
-                                        </div>
-                                        <div className="p-3 bg-gray-50 rounded-md">
-                                            <p className="text-sm font-medium text-gray-600">Fixed Overtime</p>
-                                            <p className="text-base text-gray-900 font-semibold">{selectedCrew.fixed_overtime ? `${parseFloat(String(selectedCrew.fixed_overtime)).toFixed(2)}` : '-'}</p>
-                                        </div>
-                                        <div className="p-3 bg-gray-50 rounded-md">
-                                            <p className="text-sm font-medium text-gray-600">Leave Wages</p>
-                                            <p className="text-base text-gray-900 font-semibold">{selectedCrew.leave_wages ? `${parseFloat(String(selectedCrew.leave_wages)).toFixed(2)}` : '-'}</p>
-                                        </div>
-                                        <div className="p-3 bg-gray-50 rounded-md">
-                                            <p className="text-sm font-medium text-gray-600">Other Allowances</p>
-                                            <p className="text-base text-gray-900 font-semibold">{selectedCrew.other_allowances ? `${parseFloat(String(selectedCrew.other_allowances)).toFixed(2)}` : '-'}</p>
-                                        </div>
-                                        <div className="p-3 bg-gray-50 rounded-md">
-                                            <p className="text-sm font-medium text-gray-600">Travel Wages</p>
-                                            <p className="text-base text-gray-900 font-semibold">{selectedCrew.travel_wages ? `${parseFloat(String(selectedCrew.travel_wages)).toFixed(2)}` : '-'}</p>
-                                        </div>
-                                        <div className="p-3 bg-gray-50 rounded-md">
-                                            <p className="text-sm font-medium text-gray-600">HRA</p>
-                                            <p className="text-base text-gray-900 font-semibold">{selectedCrew.hra ? `${parseFloat(String(selectedCrew.hra)).toFixed(2)}` : '-'}</p>
-                                        </div>
-                                        <div className="p-3 bg-gray-50 rounded-md">
-                                            <p className="text-sm font-medium text-gray-600">Joining Expenses</p>
-                                            <p className="text-base text-gray-900 font-semibold">{selectedCrew.joining_expenses ? `${parseFloat(String(selectedCrew.joining_expenses)).toFixed(2)}` : '-'}</p>
-                                        </div>
-                                        <div className="p-3 bg-gray-50 rounded-md">
-                                            <p className="text-sm font-medium text-gray-600">Onboard Allowance / Short Manning</p>
-                                            <p className="text-base text-gray-900 font-semibold">{selectedCrew.onboard_allowance_short_manning ? `${parseFloat(String(selectedCrew.onboard_allowance_short_manning)).toFixed(2)}` : '-'}</p>
+                                {isEditingCrewDetails ? (
+                                    <div className="space-y-4 p-4 bg-blue-50 rounded-md border border-blue-200">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Basic Salary</label>
+                                                <div className="relative">
+                                                    <span className="absolute left-3 top-2 text-gray-600 font-medium">$</span>
+                                                    <input
+                                                        type="number"
+                                                        value={crewEditData.basic_salary}
+                                                        onChange={(e) => setCrewEditData({...crewEditData, basic_salary: e.target.value})}
+                                                        placeholder="0.00"
+                                                        step="0.01"
+                                                        className="w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Fixed Overtime</label>
+                                                <div className="relative">
+                                                    <span className="absolute left-3 top-2 text-gray-600 font-medium">$</span>
+                                                    <input
+                                                        type="number"
+                                                        value={crewEditData.fixed_overtime}
+                                                        onChange={(e) => setCrewEditData({...crewEditData, fixed_overtime: e.target.value})}
+                                                        placeholder="0.00"
+                                                        step="0.01"
+                                                        className="w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Leave Wages</label>
+                                                <div className="relative">
+                                                    <span className="absolute left-3 top-2 text-gray-600 font-medium">$</span>
+                                                    <input
+                                                        type="number"
+                                                        value={crewEditData.leave_wages}
+                                                        onChange={(e) => setCrewEditData({...crewEditData, leave_wages: e.target.value})}
+                                                        placeholder="0.00"
+                                                        step="0.01"
+                                                        className="w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Other Allowances</label>
+                                                <div className="relative">
+                                                    <span className="absolute left-3 top-2 text-gray-600 font-medium">$</span>
+                                                    <input
+                                                        type="number"
+                                                        value={crewEditData.other_allowances}
+                                                        onChange={(e) => setCrewEditData({...crewEditData, other_allowances: e.target.value})}
+                                                        placeholder="0.00"
+                                                        step="0.01"
+                                                        className="w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Joining Expenses</label>
+                                                <div className="relative">
+                                                    <span className="absolute left-3 top-2 text-gray-600 font-medium">$</span>
+                                                    <input
+                                                        type="number"
+                                                        value={crewEditData.joining_expenses}
+                                                        onChange={(e) => setCrewEditData({...crewEditData, joining_expenses: e.target.value})}
+                                                        placeholder="0.00"
+                                                        step="0.01"
+                                                        className="w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Onboard Allowance / Short Manning</label>
+                                                <div className="relative">
+                                                    <span className="absolute left-3 top-2 text-gray-600 font-medium">$</span>
+                                                    <input
+                                                        type="number"
+                                                        value={crewEditData.onboard_allowance_short_manning}
+                                                        onChange={(e) => setCrewEditData({...crewEditData, onboard_allowance_short_manning: e.target.value})}
+                                                        placeholder="0.00"
+                                                        step="0.01"
+                                                        className="w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                                    />
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
-                                    <div className="p-4 bg-blue-50 rounded-md border border-blue-200 mt-4">
-                                        <p className="text-sm font-medium text-gray-600">Total Earnings</p>
-                                        <p className="text-lg text-blue-600 font-bold">{selectedCrew.total_earnings ? `${parseFloat(String(selectedCrew.total_earnings)).toFixed(2)}` : '-'}</p>
+                                ) : (
+                                    <div className="space-y-3">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div className="p-3 bg-gray-50 rounded-md">
+                                                <p className="text-sm font-medium text-gray-600">Basic Salary</p>
+                                                <p className="text-base text-gray-900 font-semibold">${selectedCrew.basic_salary ? `${parseFloat(String(selectedCrew.basic_salary)).toFixed(2)}` : '-'}</p>
+                                            </div>
+                                            <div className="p-3 bg-gray-50 rounded-md">
+                                                <p className="text-sm font-medium text-gray-600">Fixed Overtime</p>
+                                                <p className="text-base text-gray-900 font-semibold">${selectedCrew.fixed_overtime ? `${parseFloat(String(selectedCrew.fixed_overtime)).toFixed(2)}` : '-'}</p>
+                                            </div>
+                                            <div className="p-3 bg-gray-50 rounded-md">
+                                                <p className="text-sm font-medium text-gray-600">Leave Wages</p>
+                                                <p className="text-base text-gray-900 font-semibold">${selectedCrew.leave_wages ? `${parseFloat(String(selectedCrew.leave_wages)).toFixed(2)}` : '-'}</p>
+                                            </div>
+                                            <div className="p-3 bg-gray-50 rounded-md">
+                                                <p className="text-sm font-medium text-gray-600">Other Allowances</p>
+                                                <p className="text-base text-gray-900 font-semibold">${selectedCrew.other_allowances ? `${parseFloat(String(selectedCrew.other_allowances)).toFixed(2)}` : '-'}</p>
+                                            </div>
+                                            <div className="p-3 bg-gray-50 rounded-md">
+                                                <p className="text-sm font-medium text-gray-600">Joining Expenses</p>
+                                                <p className="text-base text-gray-900 font-semibold">${selectedCrew.joining_expenses ? `${parseFloat(String(selectedCrew.joining_expenses)).toFixed(2)}` : '-'}</p>
+                                            </div>
+                                            <div className="p-3 bg-gray-50 rounded-md">
+                                                <p className="text-sm font-medium text-gray-600">Onboard Allowance / Short Manning</p>
+                                                <p className="text-base text-gray-900 font-semibold">${selectedCrew.onboard_allowance_short_manning ? `${parseFloat(String(selectedCrew.onboard_allowance_short_manning)).toFixed(2)}` : '-'}</p>
+                                            </div>
+                                        </div>
+                                        <div className="p-4 bg-blue-50 rounded-md border border-blue-200 mt-4">
+                                            <p className="text-sm font-medium text-gray-600">Total Earnings</p>
+                                            <p className="text-lg text-blue-600 font-bold">${selectedCrew.total_earnings ? `${parseFloat(String(selectedCrew.total_earnings)).toFixed(2)}` : '-'}</p>
+                                        </div>
                                     </div>
-                                </div>
+                                )}
                             </div>
 
                             {/* Status Section */}

@@ -63,7 +63,6 @@ export async function GET(request: NextRequest) {
 
             return NextResponse.json(earnings);
         } catch (error) {
-            console.error('Error fetching crew earnings:', error);
             return NextResponse.json(
                 { error: 'Failed to fetch crew earnings', details: (error as Error).message },
                 { status: 500 }
@@ -96,6 +95,23 @@ export async function POST(request: NextRequest) {
                     { error: 'Crew member not found or does not belong to this vessel' },
                     { status: 404 }
                 );
+            }
+
+            // Check if crew member has exited - prevent entries after exit date
+            if (crewMember.sign_off_date) {
+                const signOffDate = new Date(crewMember.sign_off_date);
+                const monthYear = new Date(parseInt(year), parseInt(month) - 1, 1);
+                
+                // If sign_off_date is before the first day of the requested month, prevent entry
+                if (signOffDate < monthYear) {
+                    return NextResponse.json(
+                        { 
+                            error: `Cannot add earnings: Crew member ${crewMember.name} has already exited on ${signOffDate.toDateString()}`,
+                            details: `No deductions or earnings can be added after the exit date.`
+                        },
+                        { status: 400 }
+                    );
+                }
             }
 
             // Validate deduction values
@@ -145,6 +161,49 @@ export async function POST(request: NextRequest) {
                 );
             }
 
+            // Calculate brought_forward from previous month's final balance
+            let broughtForward = 0;
+            let prevMonth = parseInt(month) - 1;
+            let prevYear = parseInt(year);
+
+            if (prevMonth === 0) {
+                prevMonth = 12;
+                prevYear = prevYear - 1;
+            }
+
+            if (prevYear > 0) {
+                const prevMonthEarning = await prisma.crewEarnings.findUnique({
+                    where: {
+                        crew_member_id_month_year: {
+                            crew_member_id: parseInt(crew_member_id),
+                            month: prevMonth,
+                            year: prevYear
+                        }
+                    }
+                });
+
+                if (prevMonthEarning) {
+                    // Calculate previous month's final balance
+                    const prevTotalEarnings = 
+                        parseFloat(String(prevMonthEarning.basic_salary || 0)) +
+                        parseFloat(String(prevMonthEarning.fixed_overtime || 0)) +
+                        parseFloat(String(prevMonthEarning.leave_wages || 0)) +
+                        parseFloat(String(prevMonthEarning.other_allowances || 0)) +
+                        parseFloat(String(prevMonthEarning.travel_wages || 0)) +
+                        parseFloat(String(prevMonthEarning.hra || 0)) +
+                        parseFloat(String(prevMonthEarning.joining_expenses || 0)) +
+                        parseFloat(String(prevMonthEarning.onboard_allowance_short_manning || 0));
+
+                    const prevTotalDeductions =
+                        parseFloat(String(prevMonthEarning.cash_drawn || 0)) +
+                        parseFloat(String(prevMonthEarning.home_allowance || 0)) +
+                        parseFloat(String(prevMonthEarning.bond_deduction || 0)) +
+                        parseFloat(String(prevMonthEarning.other_deduction || 0));
+
+                    broughtForward = Math.round((prevTotalEarnings - prevTotalDeductions + parseFloat(String(prevMonthEarning.brought_forward || 0))) * 100) / 100;
+                }
+            }
+
             const earning = await prisma.crewEarnings.create({
                 data: {
                     crew_member_id: parseInt(crew_member_id),
@@ -172,12 +231,13 @@ export async function POST(request: NextRequest) {
                     cash_drawn: parseFloat(cash_drawn || 0),
                     home_allowance: parseFloat(home_allowance || 0),
                     other_deduction: parseFloat(other_deduction || 0),
+                    // Brought forward from previous month's final balance
+                    brought_forward: broughtForward,
                 }
             });
 
             return NextResponse.json(earning);
         } catch (error) {
-            console.error('Error creating crew earnings:', error);
             return NextResponse.json(
                 { error: 'Failed to create crew earnings', details: (error as Error).message },
                 { status: 500 }

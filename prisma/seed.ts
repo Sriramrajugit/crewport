@@ -1,4 +1,6 @@
 import { PrismaClient } from '@prisma/client'
+import * as bcrypt from 'bcrypt'
+
 const prisma = new PrismaClient()
 
 async function main() {
@@ -35,7 +37,10 @@ async function main() {
         },
     })
 
-    // Insert Admin user (mock password: password)
+    // Generate bcrypt hash for password "password"
+    const hashedPassword = await bcrypt.hash('password', 10)
+
+    // Insert Admin user (password: password)
     await prisma.user.upsert({
         where: {
             company_id_user_id: { company_id: company.id, user_id: 'admin' }
@@ -46,7 +51,7 @@ async function main() {
             user_id: 'admin',
             email: 'admin@crewport.com',
             full_name: 'System Admin',
-            password_hash: 'mock_password_hash', // replace later with proper hashing
+            password_hash: hashedPassword,
             role_id: adminRole.id,
         },
     })

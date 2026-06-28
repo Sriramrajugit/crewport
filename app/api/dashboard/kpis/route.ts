@@ -8,9 +8,22 @@ export async function GET(request: NextRequest) {
             const now = new Date();
             const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
             const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+            
+            // Calculate date 30 days from now
+            const thirtyDaysFromNow = new Date(now);
+            thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
 
-            // 1. Total Vessels (just 1 for selected vessel)
-            const totalVessels = 1;
+            // 1. Contracts Expiring in Next 30 Days (crew members with tentative_sign_off_date within 30 days)
+            const contractsExpiringIn30Days = await prisma.crewMember.count({
+                where: {
+                    vessel_id: vesselId,
+                    onboarding_status: 'APPROVED',
+                    tentative_sign_off_date: {
+                        gte: now,
+                        lte: thirtyDaysFromNow
+                    }
+                }
+            });
 
             // 2. Active Vessels (check if this vessel is active)
             const activeVessels = await prisma.vessel.count({
@@ -52,13 +65,21 @@ export async function GET(request: NextRequest) {
                 }
             });
 
-            // 6. Pending Requests (purchases waiting approval for this vessel)
-            const pendingRequests = await prisma.purchases.count({
-                where: { 
+            // 6. Pending Requests (crew members waiting for approval)
+            // Fetch crew and filter by pending status (case-insensitive)
+            const allCrewForVessel = await prisma.crewMember.findMany({
+                where: {
                     vessel_id: vesselId,
-                    approval_status: 'PENDING' 
+                    deleted_at: null
+                },
+                select: {
+                    id: true,
+                    onboarding_status: true
                 }
             });
+            const pendingRequests = allCrewForVessel.filter(
+                (crew: any) => crew.onboarding_status?.toUpperCase() === 'PENDING'
+            ).length;
 
             // 7. Monthly Fleet Expense (current month purchases total for this vessel)
             const monthlyExpenseResult = await prisma.purchases.aggregate({
@@ -79,7 +100,7 @@ export async function GET(request: NextRequest) {
             const avgCrewPerVessel = totalCrewOnboard;
 
             return NextResponse.json({
-                totalVessels,
+                contractsExpiringIn30Days,
                 activeVessels,
                 totalCrewOnboard,
                 crewSignOnThisMonth,

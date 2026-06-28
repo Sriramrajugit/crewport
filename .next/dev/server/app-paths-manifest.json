@@ -1,0 +1,6 @@
+{
+  "/api/auth/me/route": "app/api/auth/me/route.js",
+  "/api/dashboard/all-kpis/route": "app/api/dashboard/all-kpis/route.js",
+  "/api/dashboard/victualling-consumption/route": "app/api/dashboard/victualling-consumption/route.js",
+  "/dashboard/page": "app/dashboard/page.js"
+}

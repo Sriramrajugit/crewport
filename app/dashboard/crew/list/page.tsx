@@ -24,10 +24,16 @@ interface CrewMember {
     sign_off_port: string | null;
 }
 
+type SortField = 'name' | 'passport' | 'rank' | null;
+type SortOrder = 'asc' | 'desc';
+
 export default function CrewList() {
     const [crew, setCrew] = useState<CrewMember[]>([]);
     const [loading, setLoading] = useState(true);
     const [userRole, setUserRole] = useState('VESSEL');
+    const [searchTerm, setSearchTerm] = useState('');
+    const [sortField, setSortField] = useState<SortField>(null);
+    const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
 
     const fetchCrew = async () => {
         setLoading(true);
@@ -37,7 +43,6 @@ export default function CrewList() {
                 setCrew(await response.json());
             }
         } catch (error) {
-            console.error('Error fetching crew:', error);
         } finally {
             setLoading(false);
         }
@@ -57,6 +62,59 @@ export default function CrewList() {
         alert("Approval endpoint not yet fully implemented in mock.");
     };
 
+    const handleSort = (field: SortField) => {
+        if (sortField === field) {
+            // Toggle sort order if clicking the same field
+            setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+        } else {
+            // Set new sort field with ascending order
+            setSortField(field);
+            setSortOrder('asc');
+        }
+    };
+
+    const getFilteredAndSortedCrew = () => {
+        let filtered = crew.filter(member => {
+            const searchLower = searchTerm.toLowerCase();
+            return (
+                member.name.toLowerCase().includes(searchLower) ||
+                (member.passport_number && member.passport_number.toLowerCase().includes(searchLower)) ||
+                (member.rank && member.rank.toLowerCase().includes(searchLower))
+            );
+        });
+
+        if (sortField) {
+            filtered.sort((a, b) => {
+                let aValue: string = '';
+                let bValue: string = '';
+
+                if (sortField === 'name') {
+                    aValue = a.name;
+                    bValue = b.name;
+                } else if (sortField === 'passport') {
+                    aValue = a.passport_number || '';
+                    bValue = b.passport_number || '';
+                } else if (sortField === 'rank') {
+                    aValue = a.rank || '';
+                    bValue = b.rank || '';
+                }
+
+                if (sortOrder === 'asc') {
+                    return aValue.localeCompare(bValue);
+                } else {
+                    return bValue.localeCompare(aValue);
+                }
+            });
+        }
+
+        return filtered;
+    };
+
+    const getSortIndicator = (field: SortField) => {
+        if (sortField !== field) return ' ↕️';
+        return sortOrder === 'asc' ? ' ↑' : ' ↓';
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex justify-between items-center">
@@ -64,6 +122,33 @@ export default function CrewList() {
                     <span className="mr-3 text-blue-600">👤</span>
                     View Crew Members
                 </h1>
+            </div>
+
+            {/* Search and Filter Section */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+                <div className="flex flex-col gap-4">
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-700">🔍 Search:</span>
+                        <input
+                            type="text"
+                            placeholder="Search by name, passport, or rank..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                        {searchTerm && (
+                            <button
+                                onClick={() => setSearchTerm('')}
+                                className="px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                                Clear
+                            </button>
+                        )}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                        Found {getFilteredAndSortedCrew().length} of {crew.length} crew member(s)
+                    </div>
+                </div>
             </div>
 
             {/* Crew List Table */}
@@ -76,8 +161,20 @@ export default function CrewList() {
                     <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-white">
                             <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Passport No</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name & Rank</th>
+                                <th 
+                                    onClick={() => handleSort('passport')}
+                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50 transition-colors"
+                                    title="Click to sort"
+                                >
+                                    Passport No{getSortIndicator('passport')}
+                                </th>
+                                <th 
+                                    onClick={() => handleSort('name')}
+                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50 transition-colors"
+                                    title="Click to sort"
+                                >
+                                    Name & Rank{getSortIndicator('name')}
+                                </th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">DOB</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nationality</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vessel</th>
@@ -96,14 +193,14 @@ export default function CrewList() {
                                         Loading crew data...
                                     </td>
                                 </tr>
-                            ) : crew.length === 0 ? (
+                            ) : getFilteredAndSortedCrew().length === 0 ? (
                                 <tr>
                                     <td colSpan={userRole === 'ADMIN' ? 9 : 8} className="px-6 py-4 text-center text-sm text-gray-500">
-                                        No crew records found.
+                                        {searchTerm ? 'No crew members match your search.' : 'No crew records found.'}
                                     </td>
                                 </tr>
                             ) : (
-                                crew.map(member => (
+                                getFilteredAndSortedCrew().map(member => (
                                     <tr key={member.id} className="hover:bg-gray-50">
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                             {member.passport_number || '-'}

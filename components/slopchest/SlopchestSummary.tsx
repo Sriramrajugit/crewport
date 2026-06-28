@@ -19,7 +19,7 @@ interface ConsumptionDetail {
     unit_price: number;
     total_deduction: number;
     notes: string | null;
-    slopchest_items: {
+    inventory_items: {
         id: number;
         item_name: string;
         item_code: string;
@@ -79,7 +79,7 @@ export default function SlopchestSummary({
                 setSummary(await response.json());
             }
         } catch (err) {
-            console.error('Error fetching summary:', err);
+            // Error fetching summary
         } finally {
             setLoading(false);
         }
@@ -106,7 +106,7 @@ export default function SlopchestSummary({
                 setSelectedCrew(crew);
             }
         } catch (err) {
-            console.error('Error fetching crew details:', err);
+            // Error fetching crew details
         } finally {
             setDetailLoading(false);
         }
@@ -173,7 +173,7 @@ export default function SlopchestSummary({
                                         {crew.item_count}
                                     </td>
                                     <td className="px-6 py-4 text-sm font-medium text-right text-gray-900">
-                                        ₹{parseFloat(crew.total_deduction.toString()).toFixed(2)}
+                                        ${parseFloat(crew.total_deduction.toString()).toFixed(2)}
                                     </td>
                                 </tr>
                             ))}
@@ -185,18 +185,18 @@ export default function SlopchestSummary({
                 <div className="bg-gray-50 border-t border-gray-200 px-6 py-4 space-y-2">
                     <div className="flex justify-between items-center">
                         <span className="text-sm font-semibold text-gray-700">Crew Total:</span>
-                        <span className="text-sm font-bold text-gray-900">₹{parseFloat(totalCrewDeduction.toString()).toFixed(2)}</span>
+                        <span className="text-sm font-bold text-gray-900">${parseFloat(totalCrewDeduction.toString()).toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between items-center">
-                        <span className="text-sm font-semibold text-gray-700">On-Signers Total:</span>
+                        <span className="text-sm font-semibold text-gray-700">Owners/charterer Total:</span>
                         <span className="text-sm font-bold text-gray-900">
-                            ₹{parseFloat(summary.on_signers_total.toString()).toFixed(2)}
+                            ${parseFloat(summary.on_signers_total.toString()).toFixed(2)}
                         </span>
                     </div>
                     <div className="flex justify-between items-center pt-2 border-t border-gray-300">
                         <span className="text-base font-bold text-gray-900">Grand Total:</span>
                         <span className="text-base font-bold text-blue-600">
-                            ₹{parseFloat(summary.grand_total.toString()).toFixed(2)}
+                            ${parseFloat(summary.grand_total.toString()).toFixed(2)}
                         </span>
                     </div>
                 </div>
@@ -265,19 +265,19 @@ export default function SlopchestSummary({
                                                 {new Date(detail.consumption_date).toLocaleDateString('en-IN')}
                                             </td>
                                             <td className="px-6 py-3 text-sm font-medium text-gray-900">
-                                                {detail.slopchest_items.item_code}
+                                                {detail.inventory_items.item_code}
                                             </td>
                                             <td className="px-6 py-3 text-sm text-gray-700">
-                                                {detail.slopchest_items.item_name}
+                                                {detail.inventory_items.item_name}
                                             </td>
                                             <td className="px-6 py-3 text-sm text-center text-gray-700">
                                                 {parseFloat(detail.quantity.toString())}
                                             </td>
                                             <td className="px-6 py-3 text-sm text-right text-gray-700">
-                                                ₹{parseFloat(detail.unit_price.toString()).toFixed(2)}
+                                                ${parseFloat(detail.unit_price.toString()).toFixed(2)}
                                             </td>
                                             <td className="px-6 py-3 text-sm font-bold text-right text-gray-900">
-                                                ₹{parseFloat(detail.total_deduction.toString()).toFixed(2)}
+                                                ${parseFloat(detail.total_deduction.toString()).toFixed(2)}
                                             </td>
                                             <td className="px-6 py-3 text-sm text-gray-600">
                                                 {detail.notes || '-'}
@@ -291,7 +291,7 @@ export default function SlopchestSummary({
                                             Total:
                                         </td>
                                         <td className="px-6 py-3 text-sm font-bold text-blue-600">
-                                            ₹{consumptionDetails
+                                            ${consumptionDetails
                                                 .reduce((sum, d) => sum + parseFloat(d.total_deduction.toString()), 0)
                                                 .toFixed(2)}
                                         </td>

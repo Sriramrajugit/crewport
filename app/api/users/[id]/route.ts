@@ -30,7 +30,6 @@ export async function GET(
 
         return NextResponse.json(user);
     } catch (error) {
-        console.error('Error fetching user:', error);
         return NextResponse.json(
             { error: 'Failed to fetch user' },
             { status: 500 }
@@ -74,6 +73,20 @@ export async function PUT(
 
             // Update vessel mappings if provided
             if (selected_vessels && Array.isArray(selected_vessels)) {
+                // Get user's role to validate vessel assignment
+                const targetUser = await prisma.user.findUnique({
+                    where: { id: targetUserId },
+                    include: { users_roles: { select: { role_name: true } } }
+                });
+
+                // Check if this is a VESSEL user role
+                if (targetUser?.users_roles.role_name === 'VESSEL' && selected_vessels.length > 1) {
+                    return NextResponse.json(
+                        { error: 'Vessel users can only be assigned to one vessel' },
+                        { status: 400 }
+                    );
+                }
+
                 // Delete old mappings
                 await prisma.user_vessels.deleteMany({
                     where: { user_id: targetUserId }
@@ -104,7 +117,6 @@ export async function PUT(
 
             return NextResponse.json(updatedUser);
         } catch (error) {
-            console.error('Error updating user:', error);
             return NextResponse.json(
                 { error: 'Failed to update user', details: String(error) },
                 { status: 500 }
@@ -147,7 +159,6 @@ export async function DELETE(
 
             return NextResponse.json({ message: 'User deleted successfully' });
         } catch (error) {
-            console.error('Error deleting user:', error);
             return NextResponse.json(
                 { error: 'Failed to delete user' },
                 { status: 500 }

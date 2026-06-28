@@ -9,10 +9,18 @@ export async function POST(request: NextRequest) {
         try {
             const formData = await request.formData();
             const file = formData.get('file') as File;
+            const passportNumber = formData.get('passportNumber') as string;
 
             if (!file) {
                 return NextResponse.json(
                     { error: 'No file provided' },
+                    { status: 400 }
+                );
+            }
+
+            if (!passportNumber) {
+                return NextResponse.json(
+                    { error: 'Passport number is required' },
                     { status: 400 }
                 );
             }
@@ -40,10 +48,10 @@ export async function POST(request: NextRequest) {
                 await mkdir(uploadsDir, { recursive: true });
             }
 
-            // Generate unique filename with timestamp
+            // Generate unique filename with passport number, timestamp, and original name
             const timestamp = Date.now();
             const originalName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-            const filename = `contract_${timestamp}_${originalName}`;
+            const filename = `${passportNumber}_${timestamp}_${originalName}`;
             const filepath = join(uploadsDir, filename);
 
             // Convert file to buffer and save

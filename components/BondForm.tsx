@@ -141,7 +141,6 @@ export default function BondForm({ vessels, onSuccess }: BondFormProps) {
             }
         } catch (err) {
             setError(err instanceof Error ? err.message : 'An error occurred while creating bond purchase');
-            console.error('Error:', err);
         } finally {
             setSubmitting(false);
         }
@@ -285,14 +284,14 @@ export default function BondForm({ vessels, onSuccess }: BondFormProps) {
             {totalLocal !== null && (
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Total Local (INR)
+                        Total Local (USD)
                     </label>
                     <div className="relative">
-                        <span className="absolute left-3 top-2.5 text-gray-500 font-medium">₹</span>
+                        <span className="absolute left-3 top-2.5 text-gray-500 font-medium">$</span>
                         <input
                             type="text"
                             disabled
-                            value={totalLocal.toLocaleString('en-IN', {
+                            value={totalLocal.toLocaleString('en-US', {
                                 minimumFractionDigits: 2,
                                 maximumFractionDigits: 2,
                             })}

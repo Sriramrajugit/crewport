@@ -1,11 +1,6 @@
 import { PrismaClient } from '@prisma/client'
 
-// Log connection details only if DATABASE_URL is set
-if (process.env.DATABASE_URL) {
-    console.log('🔍 Prisma initialization:')
-    console.log('DATABASE_URL:', process.env.DATABASE_URL.substring(0, 60) + '...')
-    console.log('NODE_ENV:', process.env.NODE_ENV)
-}
+// Prisma initialization
 
 // Use a global variable to ensure a single PrismaClient instance in development
 const globalForPrisma = globalThis as any;

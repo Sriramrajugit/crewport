@@ -42,7 +42,6 @@ export async function GET(request: NextRequest) {
 
         return NextResponse.json(purchases);
     } catch (error) {
-        console.error('Error fetching purchases:', error);
         return NextResponse.json(
             { message: 'Internal server error' },
             { status: 500 }

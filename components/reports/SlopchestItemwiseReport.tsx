@@ -63,7 +63,7 @@ const SlopchestItemwiseReport = forwardRef<{ handleExportExcel: () => void }, Pr
 
                     XLSX.writeFile(workbook, filename);
                 } catch (error) {
-                    console.error('Error exporting to Excel:', error);
+                    // Error exporting to Excel
                     alert('Failed to export Excel file');
                 }
             }
@@ -100,9 +100,9 @@ const SlopchestItemwiseReport = forwardRef<{ handleExportExcel: () => void }, Pr
                         if (!itemMap.has(itemId)) {
                             itemMap.set(itemId, {
                                 item_id: itemId,
-                                item_code: c.slopchest_items.item_code,
-                                item_name: c.slopchest_items.item_name,
-                                category: c.slopchest_items.category,
+                                item_code: c.inventory_items.item_code,
+                                item_name: c.inventory_items.item_name,
+                                category: c.inventory_items.category,
                                 unit_price: parseFloat(c.unit_price.toString()),
                                 total_quantity: parseFloat(c.quantity.toString()),
                                 total_deduction: parseFloat(c.total_deduction.toString()),
@@ -121,7 +121,7 @@ const SlopchestItemwiseReport = forwardRef<{ handleExportExcel: () => void }, Pr
                     ));
                 }
             } catch (err) {
-                console.error('Error fetching item report:', err);
+                // Error fetching item report
             } finally {
                 setLoading(false);
             }
@@ -170,7 +170,7 @@ const SlopchestItemwiseReport = forwardRef<{ handleExportExcel: () => void }, Pr
                                     {item.category || '-'}
                                 </td>
                                 <td className="px-6 py-3 text-center text-gray-700">
-                                    ₹{item.unit_price.toFixed(2)}
+                                    ${item.unit_price.toFixed(2)}
                                 </td>
                                 <td className="px-6 py-3 text-center text-gray-700">
                                     {item.total_quantity.toFixed(2)}
@@ -179,7 +179,7 @@ const SlopchestItemwiseReport = forwardRef<{ handleExportExcel: () => void }, Pr
                                     {item.crew_count}
                                 </td>
                                 <td className="px-6 py-3 text-right font-bold text-gray-900">
-                                    ₹{item.total_deduction.toFixed(2)}
+                                    ${item.total_deduction.toFixed(2)}
                                 </td>
                             </tr>
                         ))}
@@ -194,7 +194,7 @@ const SlopchestItemwiseReport = forwardRef<{ handleExportExcel: () => void }, Pr
                             </td>
                             <td className="px-6 py-3 text-center"></td>
                             <td className="px-6 py-3 text-right text-blue-600">
-                                ₹{totalValue.toFixed(2)}
+                                ${totalValue.toFixed(2)}
                             </td>
                         </tr>
                     </tfoot>

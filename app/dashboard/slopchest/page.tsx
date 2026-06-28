@@ -36,12 +36,34 @@ export default function SlopchestPage() {
     };
 
     const nextMonth = () => {
+        const today = new Date();
+        const nextMonthDate = new Date(
+            currentMonth === 12 ? currentYear + 1 : currentYear,
+            currentMonth === 12 ? 0 : currentMonth,
+            1
+        );
+        
+        // Don't allow navigation to future months
+        if (nextMonthDate > today) {
+            return;
+        }
+
         if (currentMonth === 12) {
             setCurrentMonth(1);
             setCurrentYear(currentYear + 1);
         } else {
             setCurrentMonth(currentMonth + 1);
         }
+    };
+
+    const isNextMonthDisabled = () => {
+        const today = new Date();
+        const nextMonthDate = new Date(
+            currentMonth === 12 ? currentYear + 1 : currentYear,
+            currentMonth === 12 ? 0 : currentMonth,
+            1
+        );
+        return nextMonthDate > today;
     };
 
     return (
@@ -70,7 +92,12 @@ export default function SlopchestPage() {
                     </span>
                     <button
                         onClick={nextMonth}
-                        className="px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md"
+                        disabled={isNextMonthDisabled()}
+                        className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                            isNextMonthDisabled()
+                                ? 'text-gray-400 bg-gray-50 cursor-not-allowed'
+                                : 'text-gray-700 hover:bg-gray-100'
+                        }`}
                     >
                         Next →
                     </button>
@@ -97,7 +124,7 @@ export default function SlopchestPage() {
                             : 'border-transparent text-gray-600 hover:text-gray-900'
                     }`}
                 >
-                    On-Signers
+                    Owners/charterer
                 </button>
             </div>
 

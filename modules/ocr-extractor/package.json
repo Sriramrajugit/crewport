@@ -1,0 +1,28 @@
+{
+  "name": "@crewport/ocr-extractor",
+  "version": "1.0.0",
+  "description": "OCR text extraction and salary data parsing module for maritime contracts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "ocr",
+    "tesseract",
+    "text-extraction",
+    "salary",
+    "contract",
+    "maritime"
+  ],
+  "author": "Crewport",
+  "license": "MIT",
+  "peerDependencies": {
+    "tesseract.js": "^5.0.0 || ^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

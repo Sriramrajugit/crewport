@@ -1,55 +1,61 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useVessel } from '@/app/context/VesselContext';
+import VictualsConsumption from '@/components/dashboard/VictualsConsumption';
 
-interface KPIData {
-    totalVessels: number;
-    activeVessels: number;
-    totalCrewOnboard: number;
+interface VesselKPI {
+    vessel_id: number;
+    vessel_name: string;
+    pendingRequests: number;
     crewSignOnThisMonth: number;
     crewSignOffThisMonth: number;
-    pendingRequests: number;
-    monthlyFleetExpense: number;
-    avgCrewPerVessel: number;
+    totalCrewOnboard: number;
+    contractsExpiringIn30Days: number;
+    hraTransitDays: number;
+}
+
+interface AllKPIData {
+    vessels: VesselKPI[];
+    totalVesselsTagged: number;
 }
 
 export default function Dashboard() {
-    const { selectedVessel } = useVessel();
-    const [kpiData, setKpiData] = useState<KPIData | null>(null);
+    const [kpiData, setKpiData] = useState<AllKPIData | null>(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        if (!selectedVessel) return;
-
         const fetchKPIs = async () => {
             try {
-                const response = await fetch('/api/dashboard/kpis', {
-                    headers: {
-                        'X-Vessel-Id': selectedVessel.vessel_id.toString()
-                    }
-                });
-                if (!response.ok) throw new Error('Failed to fetch KPIs');
+                const response = await fetch('/api/dashboard/all-kpis');
+                
+                // If 401, user is not authenticated
+                if (response.status === 401) {
+                    setError('Not authenticated. Please log in first.');
+                    // Redirect to login after 2 seconds
+                    setTimeout(() => {
+                        window.location.href = '/login';
+                    }, 2000);
+                    return;
+                }
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Failed to fetch KPIs');
+                }
+                
                 const data = await response.json();
                 setKpiData(data);
             } catch (error) {
                 console.error('Error fetching KPIs:', error);
+                setError((error as Error).message || 'Failed to load dashboard');
             } finally {
                 setLoading(false);
             }
         };
 
         fetchKPIs();
-    }, [selectedVessel]);
-
-    const formatCurrency = (value: number) => {
-        return new Intl.NumberFormat('en-IN', {
-            style: 'currency',
-            currency: 'INR',
-            minimumFractionDigits: 0,
-            maximumFractionDigits: 0
-        }).format(value);
-    };
+    }, []);
 
     const KPICard = ({ 
         title, 
@@ -64,14 +70,14 @@ export default function Dashboard() {
         color: string;
         subtitle?: string;
     }) => (
-        <div className={`bg-white p-6 rounded-lg shadow-md border-l-4 ${color}`}>
+        <div className={`bg-white p-4 rounded-lg shadow-md border-l-4 ${color}`}>
             <div className="flex items-start justify-between">
                 <div>
-                    <h3 className="text-sm font-medium text-gray-500">{title}</h3>
-                    <p className="mt-2 text-3xl font-bold text-gray-900">{value}</p>
+                    <h3 className="text-xs font-medium text-gray-500 uppercase">{title}</h3>
+                    <p className="mt-2 text-2xl font-bold text-gray-900">{value}</p>
                     {subtitle && <p className="mt-1 text-xs text-gray-400">{subtitle}</p>}
                 </div>
-                <span className="text-3xl">{icon}</span>
+                <span className="text-2xl">{icon}</span>
             </div>
         </div>
     );
@@ -90,6 +96,23 @@ export default function Dashboard() {
         );
     }
 
+    if (error) {
+        return (
+            <div className="space-y-6">
+                <h1 className="text-3xl font-bold text-gray-900 flex items-center">
+                    <span className="mr-3 text-blue-600">📊</span>
+                    Fleet Overview Dashboard
+                </h1>
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+                    <p className="text-yellow-800"><strong>⚠️ Error:</strong> {error}</p>
+                    {error.includes('Not authenticated') && (
+                        <p className="text-yellow-700 mt-2">Redirecting to login...</p>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-8">
             {/* Header */}
@@ -101,101 +124,115 @@ export default function Dashboard() {
                 <p className="text-gray-600 mt-1">Real-time fleet and crew management metrics</p>
             </div>
 
-            {/* KPI Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {/* Vessel KPIs */}
-                <KPICard
-                    title="Total Vessels"
-                    value={kpiData?.totalVessels ?? 0}
-                    icon="⛴️"
-                    color="border-blue-500"
-                    subtitle="In system"
-                />
-                
-                <KPICard
-                    title="Active Vessels"
-                    value={kpiData?.activeVessels ?? 0}
-                    icon="🚢"
-                    color="border-green-500"
-                    subtitle="Currently operating"
-                />
-
-                {/* Crew KPIs */}
-                <KPICard
-                    title="Total Crew Onboard"
-                    value={kpiData?.totalCrewOnboard ?? 0}
-                    icon="👥"
-                    color="border-purple-500"
-                    subtitle="Active status"
-                />
-
-                <KPICard
-                    title="Avg Crew Per Vessel"
-                    value={kpiData?.avgCrewPerVessel ?? 0}
-                    icon="📈"
-                    color="border-indigo-500"
-                    subtitle="Average density"
-                />
-
-                {/* Monthly Activities */}
-                <KPICard
-                    title="Sign-on This Month"
-                    value={kpiData?.crewSignOnThisMonth ?? 0}
-                    icon="✨"
-                    color="border-emerald-500"
-                    subtitle="New joiners"
-                />
-
-                <KPICard
-                    title="Sign-off This Month"
-                    value={kpiData?.crewSignOffThisMonth ?? 0}
-                    icon="📋"
-                    color="border-orange-500"
-                    subtitle="Completed contracts"
-                />
-
-                {/* Financial & Admin KPIs */}
-                <KPICard
-                    title="Monthly Fleet Expense"
-                    value={formatCurrency(kpiData?.monthlyFleetExpense ?? 0)}
-                    icon="💰"
-                    color="border-red-500"
-                    subtitle="Provisions + Purchases"
-                />
-
-                <KPICard
-                    title="Pending Requests"
-                    value={kpiData?.pendingRequests ?? 0}
-                    icon="⏳"
-                    color="border-yellow-500"
-                    subtitle="Awaiting approval"
-                />
-            </div>
-
-            {/* Summary Section */}
-            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-lg border border-blue-200">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Fleet Summary</h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
-                    <div>
-                        <p className="text-gray-600">Fleet Utilization</p>
-                        <p className="text-xl font-bold text-blue-600 mt-1">
-                            {kpiData ? Math.round((kpiData.activeVessels / kpiData.totalVessels) * 100) : 0}%
-                        </p>
-                    </div>
-                    <div>
-                        <p className="text-gray-600">Total Crew Strength</p>
-                        <p className="text-xl font-bold text-indigo-600 mt-1">
-                            {kpiData?.totalCrewOnboard ?? 0} / {kpiData ? Math.round(kpiData.totalCrewOnboard + kpiData.crewSignOnThisMonth) : 0}
-                        </p>
-                    </div>
-                    <div>
-                        <p className="text-gray-600">Approval Pending</p>
-                        <p className="text-xl font-bold text-orange-600 mt-1">
-                            {kpiData?.pendingRequests ?? 0} items
-                        </p>
+            {/* Fleet Summary Table */}
+            {kpiData && kpiData.vessels.length > 0 && (
+                <div className="bg-white rounded-lg shadow-md overflow-hidden">
+                    <div className="overflow-x-auto">
+                        <table className="w-full">
+                            <thead>
+                                <tr className="bg-gradient-to-r from-blue-600 to-blue-700 text-white">
+                                    <th className="px-6 py-4 text-left text-sm font-semibold">Vessel Name</th>
+                                    <th className="px-6 py-4 text-center text-sm font-semibold">
+                                        <span className="flex items-center justify-center gap-2">
+                                            <span>⏳</span>
+                                            <span>Pending Requests</span>
+                                        </span>
+                                    </th>
+                                    <th className="px-6 py-4 text-center text-sm font-semibold">
+                                        <span className="flex items-center justify-center gap-2">
+                                            <span>✨</span>
+                                            <span>Sign-on This Month</span>
+                                        </span>
+                                    </th>
+                                    <th className="px-6 py-4 text-center text-sm font-semibold">
+                                        <span className="flex items-center justify-center gap-2">
+                                            <span>📋</span>
+                                            <span>Sign-off This Month</span>
+                                        </span>
+                                    </th>
+                                    <th className="px-6 py-4 text-center text-sm font-semibold">
+                                        <span className="flex items-center justify-center gap-2">
+                                            <span>👥</span>
+                                            <span>Total Crew Onboard</span>
+                                        </span>
+                                    </th>
+                                    <th className="px-6 py-4 text-center text-sm font-semibold">
+                                        <span className="flex items-center justify-center gap-2">
+                                            <span>⏰</span>
+                                            <span>Contracts Expiring in 30 Days</span>
+                                        </span>
+                                    </th>
+                                    <th className="px-6 py-4 text-center text-sm font-semibold">
+                                        <span className="flex items-center justify-center gap-2">
+                                            <span>✈️</span>
+                                            <span>HRA Transit Days</span>
+                                        </span>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                                {kpiData.vessels.map((vessel, index) => (
+                                    <tr key={vessel.vessel_id} className={index % 2 === 0 ? 'bg-white hover:bg-gray-50' : 'bg-gray-50 hover:bg-gray-100'}>
+                                        <td className="px-6 py-4 text-sm font-medium text-gray-900">{vessel.vessel_name}</td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className={`inline-flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold ${
+                                                vessel.pendingRequests > 0 ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'
+                                            }`}>
+                                                {vessel.pendingRequests}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className={`inline-flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold ${
+                                                vessel.crewSignOnThisMonth > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-800'
+                                            }`}>
+                                                {vessel.crewSignOnThisMonth}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className={`inline-flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold ${
+                                                vessel.crewSignOffThisMonth > 0 ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-800'
+                                            }`}>
+                                                {vessel.crewSignOffThisMonth}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className={`inline-flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold ${
+                                                'bg-purple-100 text-purple-800'
+                                            }`}>
+                                                {vessel.totalCrewOnboard}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className={`inline-flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold ${
+                                                vessel.contractsExpiringIn30Days > 0 ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'
+                                            }`}>
+                                                {vessel.contractsExpiringIn30Days}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 text-center">
+                                            <span className={`inline-flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold ${
+                                                vessel.hraTransitDays > 0 ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
+                                            }`}>
+                                                {vessel.hraTransitDays}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
-            </div>
+            )}
+
+            {/* Empty State */}
+            {kpiData && kpiData.vessels.length === 0 && (
+                <div className="bg-white rounded-lg shadow-md p-8 text-center">
+                    <p className="text-gray-600">No vessels assigned to your account.</p>
+                </div>
+            )}
+
+            {/* Victualling Consumption Section */}
+            <VictualsConsumption />
         </div>
     );
 }

@@ -1,11 +1,18 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getUserIdFromRequest } from '@/lib/accessControl';
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
     try {
-        // Get user from session/cookie
-        // For now, using mock user ID 1 - replace with actual session handling
-        const userId = 1;
+        // Try to get user ID from request (will look up by email)
+        const userId = await getUserIdFromRequest(request);
+        
+        if (!userId) {
+            return NextResponse.json(
+                { error: 'User not authenticated' },
+                { status: 401 }
+            );
+        }
 
         const user = await prisma.user.findUnique({
             where: { id: userId, deleted_at: null },
@@ -49,31 +56,22 @@ export async function GET(request: Request) {
         const isAdmin = user.users_roles.role_name === 'ADMIN' || 
                        user.users_roles.role_name === 'SUPER_ADMIN';
 
-        // For admin users, fetch all vessels; otherwise use assigned vessels
-        let vessels;
-        if (isAdmin) {
-            const allVessels = await prisma.vessel.findMany({
-                where: { },
-                include: {
-                    companies: { select: { company_name: true } }
-                }
-            });
-            vessels = allVessels.map((v: any) => ({
-                vessel_id: v.id,
-                vessel_name: v.vessel_name,
-                company_name: v.companies.company_name,
-                role_on_vessel: 'ADMIN'
-            }));
-        } else {
-            vessels = user.user_vessels.map((uv: any) => ({
-                vessel_id: uv.vessels.id,
-                vessel_name: uv.vessels.vessel_name,
-                company_name: uv.vessels.companies.company_name,
-                role_on_vessel: uv.role_on_vessel
-            }));
-        }
+        console.log(`[Auth] User ID: ${userId}, Email: ${user.email}, Role: ${user.users_roles.role_name}, IsAdmin: ${isAdmin}`);
+
+        // For all users (including admin), use assigned vessels only
+        // This ensures access control: users can only see vessels they're assigned to
+        console.log(`[Auth] Fetching assigned vessels. Found ${user.user_vessels.length} assigned vessels`);
+        const vessels = user.user_vessels.map((uv: any) => ({
+            vessel_id: uv.vessels.id,
+            vessel_name: uv.vessels.vessel_name,
+            company_name: uv.vessels.companies.company_name,
+            role_on_vessel: isAdmin ? 'ADMIN' : uv.role_on_vessel
+        }));
 
         // Format response with assigned vessels
+        console.log(`[Auth/Me] Returning ${vessels.length} vessels for user ${user.email} (Role: ${user.users_roles.role_name})`);
+        console.log(`[Auth/Me] Vessels:`, vessels.map((v: any) => v.vessel_name));
+
         return NextResponse.json({
             id: user.id,
             name: user.full_name,

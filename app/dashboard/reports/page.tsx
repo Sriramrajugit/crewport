@@ -13,19 +13,19 @@ export default function ReportsDashboard() {
 
             <div className="grid grid-cols-1 gap-6">
                 <Link href="/dashboard/reports/portage-bill">
-                    <div className="bg-gradient-to-r from-orange-50 to-amber-50 p-8 rounded-lg shadow hover:shadow-xl border-2 border-orange-300 hover:border-orange-500 cursor-pointer transition-all transform hover:scale-105">
-                        <div className="flex items-center gap-6">
-                            <div className="text-6xl">📊</div>
+                    <div className="bg-gradient-to-r from-orange-50 to-amber-50 p-4 rounded-lg shadow hover:shadow-xl border-2 border-orange-300 hover:border-orange-500 cursor-pointer transition-all transform hover:scale-105 max-w-2xl">
+                        <div className="flex items-center gap-4">
+                            <div className="text-4xl">📊</div>
                             <div className="flex-1">
-                                <h3 className="font-bold text-2xl text-gray-900 mb-2">Portage Bill Report</h3>
-                                <p className="text-gray-700 mb-3">Monthly earnings and deductions summary for all crew members</p>
-                                <div className="flex flex-wrap gap-2">
-                                    <span className="inline-block bg-orange-200 text-orange-800 px-3 py-1 rounded-full text-sm font-medium">Earnings</span>
-                                    <span className="inline-block bg-amber-200 text-amber-800 px-3 py-1 rounded-full text-sm font-medium">Deductions</span>
-                                    <span className="inline-block bg-yellow-200 text-yellow-800 px-3 py-1 rounded-full text-sm font-medium">Final Balance</span>
+                                <h3 className="font-bold text-lg text-gray-900 mb-1">Portage Bill</h3>
+                                <p className="text-gray-700 mb-2 text-sm">Monthly crew earnings & deductions</p>
+                                <div className="flex flex-wrap gap-1">
+                                    <span className="inline-block bg-orange-200 text-orange-800 px-2 py-0.5 rounded-full text-xs font-medium">Earnings</span>
+                                    <span className="inline-block bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full text-xs font-medium">Deductions</span>
+                                    <span className="inline-block bg-yellow-200 text-yellow-800 px-2 py-0.5 rounded-full text-xs font-medium">Final Balance</span>
                                 </div>
                             </div>
-                            <div className="text-4xl">→</div>
+                            <div className="text-2xl">→</div>
                         </div>
                     </div>
                 </Link>
@@ -33,9 +33,27 @@ export default function ReportsDashboard() {
 
             <div className="mt-8">
                 <h2 className="text-xl font-bold text-gray-900 mb-4">Other Reports</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-4 gap-6">
+                    <Link href="/dashboard/reports/travel-wages">
+                        <div className="bg-white p-6 rounded-lg shadow flex items-center space-x-4 border border-gray-200 hover:border-green-400 hover:shadow-lg transition-all cursor-pointer">
+                            <div className="text-4xl">✈️</div>
+                            <div>
+                                <h3 className="font-bold text-lg">Travel Wages Report</h3>
+                                <p className="text-sm text-gray-500">Travel wages entries by employee</p>
+                            </div>
+                        </div>
+                    </Link>
+                    <Link href="/dashboard/reports/hra">
+                        <div className="bg-white p-6 rounded-lg shadow flex items-center space-x-4 border border-gray-200 hover:border-red-400 hover:shadow-lg transition-all cursor-pointer">
+                            <div className="text-4xl">⚠️</div>
+                            <div>
+                                <h3 className="font-bold text-lg">HRA - High Risk Area Report</h3>
+                                <p className="text-sm text-gray-500">High Risk Area entries by employee and date range</p>
+                            </div>
+                        </div>
+                    </Link>
                     <Link href="/dashboard/reports/slopchest">
-                        <div className="bg-white p-6 rounded-lg shadow flex items-center space-x-4 border border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer">
+                        <div className="bg-white p-6 rounded-lg shadow flex items-center space-x-4 border border-gray-200 hover:border-amber-400 hover:shadow-lg transition-all cursor-pointer">
                             <div className="text-4xl">🏪</div>
                             <div>
                                 <h3 className="font-bold text-lg">Slopchest Reports</h3>

@@ -79,7 +79,7 @@ export async function PUT(
             // Verify the earnings record exists and belongs to a crew member in this vessel
             const earning = await prisma.crewEarnings.findUnique({
                 where: { id: parseInt(id) },
-                include: { crew_members: { select: { vessel_id: true } } }
+                include: { crew_members: { select: { id: true, name: true, vessel_id: true, sign_off_date: true } } }
             });
 
             if (!earning || earning.crew_members?.vessel_id !== vesselId) {
@@ -87,6 +87,23 @@ export async function PUT(
                     { error: 'Earnings record not found or access denied' },
                     { status: 403 }
                 );
+            }
+
+            // Check if crew member has exited - prevent updates after exit date
+            if (earning.crew_members?.sign_off_date) {
+                const signOffDate = new Date(earning.crew_members.sign_off_date);
+                const monthYear = new Date(earning.year, earning.month - 1, 1);
+                
+                // If sign_off_date is before the first day of the earnings month, prevent update
+                if (signOffDate < monthYear) {
+                    return NextResponse.json(
+                        { 
+                            error: `Cannot update earnings: Crew member ${earning.crew_members.name} has already exited on ${signOffDate.toDateString()}`,
+                            details: `No deductions or earnings can be updated after the exit date.`
+                        },
+                        { status: 400 }
+                    );
+                }
             }
 
             const updated = await prisma.crewEarnings.update({
@@ -104,7 +121,6 @@ export async function PUT(
 
             return NextResponse.json(updated);
         } catch (error) {
-            console.error('Error updating crew earnings:', error);
             return NextResponse.json(
                 { error: 'Failed to update crew earnings', details: (error as Error).message },
                 { status: 500 }
@@ -151,7 +167,6 @@ export async function GET(
 
             return NextResponse.json(earning);
         } catch (error) {
-            console.error('Error fetching crew earnings:', error);
             return NextResponse.json(
                 { error: 'Failed to fetch crew earnings', details: (error as Error).message },
                 { status: 500 }

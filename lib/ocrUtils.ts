@@ -69,45 +69,36 @@ export async function processContractWithOCR(file: File): Promise<{
     error?: string;
 }> {
     try {
-        console.log('[OCR] Starting OCR processing for file:', file.name);
         // Create a reader to convert file to base64
         const reader = new FileReader();
         
         return new Promise((resolve) => {
             reader.onload = async () => {
                 try {
-                    console.log('[OCR] File loaded, starting Tesseract recognition');
                     const result = await Tesseract.recognize(
                         reader.result as string,
                         'eng',
                         {
                             logger: (m) => {
-                                // Log progress if needed
-                                console.log('[OCR Progress]:', m);
+                                // Progress logging disabled
                             }
                         }
                     );
 
-                    console.log('[OCR] Recognition complete');
                     const extractedText = result.data.text;
-                    console.log('[OCR] Text length:', extractedText.length);
                     const salaryData = extractSalaryFromText(extractedText);
-
-                    console.log('[OCR] Resolving with:', { textLength: extractedText.length, salaryData });
                     resolve({
                         text: extractedText,
                         salaryData,
                     });
 
                     // Clean up Tesseract worker
-                    console.log('[OCR] Cleaning up');
                     try {
                         await (Tesseract as any).terminate();
                     } catch (err) {
-                        console.log('[OCR] Cleanup note:', err);
+                        // Cleanup error ignored
                     }
                 } catch (error) {
-                    console.error('[OCR] Error during recognition:', error);
                     resolve({
                         text: '',
                         salaryData: {},
@@ -117,16 +108,12 @@ export async function processContractWithOCR(file: File): Promise<{
             };
 
             reader.onerror = () => {
-                console.error('[OCR] FileReader error');
                 resolve({
                     text: '',
                     salaryData: {},
                     error: 'Failed to read file',
                 });
             };
-
-            // Read the file
-            console.log('[OCR] Starting file read');
             reader.readAsDataURL(file);
         });
     } catch (error) {

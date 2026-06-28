@@ -27,6 +27,7 @@ model Company {
   users             User[]
   vessels           Vessel[]
   ranks             Rank[]
+  inventory_items   InventoryItem[]
   slopchest_items   SlopchestItem[]
 
   @@index([company_code], map: "idx_companies_code")
@@ -61,6 +62,8 @@ model User {
   purchases_purchases_created_byTousers                  purchases[]      @relation("purchases_created_byTousers")
   user_sessions                                          UserSession[]
   user_vessels                                           user_vessels[]
+  inventory_consumptions                                 InventoryConsumption[] @relation("user_inventory_consumptions")
+  inventory_on_signers                                   InventoryOnSigner[] @relation("user_inventory_on_signers")
   slopchest_consumptions                                 SlopchestConsumption[]
   slopchest_on_signers                                   SlopchestOnSigner[]
   companies                                              Company          @relation(fields: [company_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -81,32 +84,54 @@ model User {
 }
 
 model Vessel {
-  id                          Int          @id @default(autoincrement())
-  company_id                  Int
-  vessel_name                 String       @db.VarChar(150)
-  imo_number                  String?      @db.VarChar(50)
-  mmsi_number                 String?      @db.VarChar(50)
-  vessel_type                 String?      @db.VarChar(100)
-  flag_state                  String?      @db.VarChar(100)
-  owner_company               String?      @db.VarChar(150)
-  length                      Decimal?     @db.Decimal(10, 2)
-  beam                        Decimal?     @db.Decimal(10, 2)
-  draft                       Decimal?     @db.Decimal(10, 2)
-  gross_tonnage               Decimal?     @db.Decimal(12, 2)
-  net_tonnage                 Decimal?     @db.Decimal(12, 2)
-  deadweight_tonnage          Decimal?     @db.Decimal(12, 2)
-  year_built                  Int?
-  engine_power                Decimal?     @db.Decimal(10, 2)
-  status                      String?      @default("ACTIVE") @db.VarChar(50)
-  created_at                  DateTime?    @default(now()) @db.Timestamp(6)
-  updated_at                  DateTime?    @default(now()) @db.Timestamp(6)
-  crew_members                CrewMember[]
-  purchases                   purchases[]
-  users                       User[]
-  user_vessels                user_vessels[]
-  slopchest_consumptions      SlopchestConsumption[]
-  slopchest_on_signers        SlopchestOnSigner[]
-  companies                   Company      @relation(fields: [company_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  id                              Int          @id @default(autoincrement())
+  company_id                      Int
+  vessel_name                     String       @db.VarChar(150)
+  imo_number                      String?      @db.VarChar(50)
+  mmsi_number                     String?      @db.VarChar(20)
+  call_sign                       String?      @db.VarChar(20)
+  vessel_type                     String?      @db.VarChar(100)
+  vessel_subtype                  String?      @db.VarChar(50)
+  flag                            String?      @db.VarChar(50)
+  greek_flag                      Boolean?     @default(false)
+  registry_no                     String?      @db.VarChar(50)
+  nat_number                      String?      @db.VarChar(50)
+  port_of_registry                String?      @db.VarChar(100)
+  year_built                      Int?
+  builder                         String?      @db.VarChar(100)
+  hull_number                     String?      @db.VarChar(50)
+  classification_society          String?      @db.VarChar(50)
+  class_notation                  String?      @db.VarChar(100)
+  ice_class                       String?      @db.VarChar(50)
+  vessel_value                    Decimal?     @db.Decimal(18, 2)
+  status                          String?      @default("ACTIVE") @db.VarChar(50)
+  created_at                      DateTime?    @default(now()) @db.Timestamp(6)
+  updated_at                      DateTime?    @default(now()) @db.Timestamp(6)
+  crew_members                    CrewMember[]
+  purchases                       purchases[]
+  users                           User[]
+  user_vessels                    user_vessels[]
+  inventory_items                 InventoryItem[] @relation("vessel_inventory_items")
+  inventory_consumptions          InventoryConsumption[] @relation("vessel_inventory_consumptions")
+  inventory_on_signers            InventoryOnSigner[] @relation("vessel_inventory_on_signers")
+  slopchest_consumptions          SlopchestConsumption[]
+  slopchest_on_signers            SlopchestOnSigner[]
+  vessel_ownership                VesselOwnership?
+  vessel_commercial               VesselCommercial?
+  vessel_technical                VesselTechnical?
+  vessel_engine                   VesselEngine?
+  vessel_propulsion               VesselPropulsion?
+  vessel_tanks                    VesselTanks?
+  vessel_certificates             VesselCertificate[]
+  vessel_crew_config              VesselCrewConfig?
+  vessel_navigation               VesselNavigation?
+  vessel_environment              VesselEnvironment?
+  vessel_maintenance              VesselMaintenance?
+  vessel_clear_deck               VesselClearDeck?
+  vessel_steering_gear            VesselSteeringGear?
+  vessel_side_thrusters           VesselSideThusters?
+  vessel_general_details          VesselGeneralDetails?
+  companies                       Company      @relation(fields: [company_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([company_id, imo_number])
   @@index([company_id], map: "idx_vessels_company_id")
@@ -131,6 +156,8 @@ model CrewMember {
   sign_off_date                                   DateTime? @db.Date
   sign_on_port                                    String?   @db.VarChar(100)
   sign_off_port                                   String?   @db.VarChar(100)
+  contract_duration_months                        Int?
+  tentative_sign_off_date                         DateTime? @db.Date
   exit_type                                       String?   @db.VarChar(50)
   exit_remarks                                    String?
   contract_file                                   String?
@@ -163,6 +190,9 @@ model CrewMember {
   users_crew_members_user_idTousers               User?     @relation("crew_members_user_idTousers", fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   vessels                                         Vessel    @relation(fields: [vessel_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   crew_earnings                                   CrewEarnings[]
+  crew_hra_entries                                CrewHRAEntry[]
+  crew_travel_wages_entries                       CrewTravelWagesEntry[]
+  inventory_consumptions                          InventoryConsumption[]
   slopchest_consumptions                          SlopchestConsumption[]
 
   @@index([company_id], map: "idx_crew_company_id")
@@ -200,6 +230,44 @@ model CrewEarnings {
   @@index([crew_member_id], map: "idx_crew_earnings_crew_id")
   @@index([month, year], map: "idx_crew_earnings_month_year")
   @@map("crew_earnings")
+}
+
+model CrewHRAEntry {
+  id                Int       @id @default(autoincrement())
+  crew_member_id    Int
+  month             Int       @db.Integer
+  year              Int       @db.Integer
+  hra_date          DateTime  @db.Date
+  hra_period_start  DateTime? @db.Date
+  hra_period_end    DateTime? @db.Date
+  days_calculated   Int?      @default(0)
+  hra_amount        Decimal   @db.Decimal(15, 2)
+  created_at        DateTime? @default(now()) @db.Timestamp(6)
+  updated_at        DateTime? @default(now()) @db.Timestamp(6)
+  crew_members      CrewMember @relation(fields: [crew_member_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([crew_member_id], map: "idx_crew_hra_crew_id")
+  @@index([crew_member_id, month, year], map: "idx_crew_hra_month_year")
+  @@index([month, year], map: "idx_crew_hra_month_year_all")
+  @@map("crew_hra_entries")
+}
+
+model CrewTravelWagesEntry {
+  id                    Int       @id @default(autoincrement())
+  crew_member_id        Int
+  month                 Int       @db.Integer
+  year                  Int       @db.Integer
+  travel_wages_date     DateTime  @db.Date
+  days_calculated       Int?      @default(0)
+  travel_wages_amount   Decimal   @db.Decimal(15, 2)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+  crew_members          CrewMember @relation(fields: [crew_member_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([crew_member_id], map: "idx_crew_travel_wages_crew_id")
+  @@index([crew_member_id, month, year], map: "idx_crew_travel_wages_month_year")
+  @@index([month, year], map: "idx_crew_travel_wages_month_year_all")
+  @@map("crew_travel_wages_entries")
 }
 
 model UserSession {
@@ -260,13 +328,16 @@ model Rank {
 }
 
 model Port {
-  id          Int          @id @default(autoincrement())
-  port_name   String       @db.VarChar(100)
-  port_code   String       @unique @db.VarChar(20)
-  country     String?      @db.VarChar(100)
-  is_active   Boolean?     @default(true)
-  created_at  DateTime?    @default(now()) @db.Timestamp(6)
-  updated_at  DateTime?    @default(now()) @db.Timestamp(6)
+  id            Int          @id @default(autoincrement())
+  code          String       @unique @db.VarChar(20)
+  name          String       @db.VarChar(100)
+  country_code  String?      @db.VarChar(10)
+  zone_code     String?      @db.VarChar(50)
+  latitude      Decimal?     @db.Decimal(10, 6)
+  longitude     Decimal?     @db.Decimal(10, 6)
+  is_active     Boolean?     @default(true)
+  created_at    DateTime?    @default(now()) @db.Timestamp(6)
+  updated_at    DateTime?    @default(now()) @db.Timestamp(6)
 
   @@index([is_active], map: "idx_port_is_active")
   @@map("ports")
@@ -393,13 +464,93 @@ model user_vessels {
   @@map("user_vessels")
 }
 
-// Slopchest Management
+// Unified Inventory Management (replacing separate slopchest/victualling models)
+model InventoryItem {
+  id                      Int                     @id @default(autoincrement())
+  company_id              Int                     // For access control
+  vessel_id               Int                     // Vessel-specific inventory
+  inventory_type          String                  @db.VarChar(50)  // 'SLOPCHEST' or 'VICTUALLING'
+  item_name               String                  @db.VarChar(150)
+  item_code               String                  @db.VarChar(50)
+  unit_price              Decimal                 @db.Decimal(10, 2)
+  available_quantity      Decimal                 @default(0) @db.Decimal(10, 2)
+  unit                    String                  @default("units") @db.VarChar(50)
+  category                String?                 @db.VarChar(100)
+  is_active               Boolean                 @default(true)
+  created_at              DateTime?               @default(now()) @db.Timestamp(6)
+  updated_at              DateTime?               @default(now()) @db.Timestamp(6)
+  companies               Company                 @relation(fields: [company_id], references: [id])
+  vessels                 Vessel                  @relation("vessel_inventory_items", fields: [vessel_id], references: [id])
+  inventory_consumptions  InventoryConsumption[]
+  inventory_on_signers    InventoryOnSigner[]
+
+  @@unique([vessel_id, item_code, inventory_type])
+  @@index([company_id], map: "idx_inventory_item_company")
+  @@index([vessel_id], map: "idx_inventory_item_vessel")
+  @@index([inventory_type], map: "idx_inventory_item_type")
+  @@index([is_active], map: "idx_inventory_item_active")
+  @@map("inventory_items")
+}
+
+model InventoryConsumption {
+  id                Int             @id @default(autoincrement())
+  vessel_id         Int
+  crew_member_id    Int?
+  item_id           Int
+  consumption_date  DateTime        @db.Date
+  month             Int             @db.Integer
+  year              Int             @db.Integer
+  quantity          Decimal         @db.Decimal(10, 2)
+  unit_price        Decimal         @db.Decimal(10, 2)
+  total_deduction   Decimal         @db.Decimal(15, 2)
+  notes             String?         @db.VarChar(500)
+  created_by        Int
+  created_at        DateTime        @default(now()) @db.Timestamp(6)
+  updated_at        DateTime?       @default(now()) @db.Timestamp(6)
+  vessels           Vessel          @relation("vessel_inventory_consumptions", fields: [vessel_id], references: [id])
+  crew_members      CrewMember?     @relation(fields: [crew_member_id], references: [id], onDelete: SetNull)
+  inventory_items   InventoryItem   @relation(fields: [item_id], references: [id])
+  users             User            @relation("user_inventory_consumptions", fields: [created_by], references: [id])
+
+  @@unique([vessel_id, crew_member_id, item_id, consumption_date])
+  @@index([vessel_id], map: "idx_inventory_consumption_vessel")
+  @@index([crew_member_id], map: "idx_inventory_consumption_crew")
+  @@index([month, year], map: "idx_inventory_consumption_month_year")
+  @@map("inventory_consumptions")
+}
+
+model InventoryOnSigner {
+  id                Int             @id @default(autoincrement())
+  vessel_id         Int
+  item_id           Int
+  signer_name       String          @db.VarChar(150)
+  consumption_date  DateTime        @db.Date
+  month             Int             @db.Integer
+  year              Int             @db.Integer
+  quantity          Decimal         @db.Decimal(10, 2)
+  unit_price        Decimal         @db.Decimal(10, 2)
+  total_deduction   Decimal         @db.Decimal(15, 2)
+  remarks           String?         @db.VarChar(500)
+  created_by        Int
+  created_at        DateTime        @default(now()) @db.Timestamp(6)
+  updated_at        DateTime?       @default(now()) @db.Timestamp(6)
+  vessels           Vessel          @relation("vessel_inventory_on_signers", fields: [vessel_id], references: [id])
+  inventory_items   InventoryItem   @relation(fields: [item_id], references: [id])
+  users             User            @relation("user_inventory_on_signers", fields: [created_by], references: [id])
+
+  @@index([vessel_id], map: "idx_inventory_onsigner_vessel")
+  @@index([month, year], map: "idx_inventory_onsigner_month_year")
+  @@map("inventory_on_signers")
+}
+
+// Slopchest Management (DEPRECATED - kept for backward compatibility reference only)
 model SlopchestItem {
   id                Int                        @id @default(autoincrement())
   company_id        Int
   item_name         String                     @db.VarChar(150)
   item_code         String                     @db.VarChar(50)
   unit_price        Decimal                    @db.Decimal(10, 2)
+  available_quantity Decimal                   @default(0) @db.Decimal(10, 2)
   unit              String                     @default("units") @db.VarChar(50)
   category          String?                    @db.VarChar(100)
   is_active         Boolean                    @default(true)
@@ -464,4 +615,319 @@ model SlopchestOnSigner {
   @@index([vessel_id], map: "idx_slopchest_onsigner_vessel")
   @@index([month, year], map: "idx_slopchest_onsigner_month_year")
   @@map("slopchest_on_signers")
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// VESSEL MANAGEMENT MODELS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+model VesselOwnership {
+  id                    Int       @id @default(autoincrement())
+  vessel_id             Int       @unique
+  registered_owner      String?   @db.VarChar(150)
+  beneficial_owner      String?   @db.VarChar(150)
+  technical_manager     String?   @db.VarChar(150)
+  commercial_manager    String?   @db.VarChar(150)
+  operator              String?   @db.VarChar(150)
+  ism_manager           String?   @db.VarChar(150)
+  isps_company          String?   @db.VarChar(150)
+  official_manager      String?   @db.VarChar(150)
+  ship_manager          String?   @db.VarChar(150)
+  crew_manager          String?   @db.VarChar(150)
+  superintendent        String?   @db.VarChar(150)
+  group_manager         String?   @db.VarChar(150)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+  vessels               Vessel    @relation(fields: [vessel_id], references: [id], onDelete: Cascade)
+
+  @@index([vessel_id], map: "idx_vessel_ownership_vessel")
+  @@map("vessel_ownership")
+}
+
+model VesselCommercial {
+  id                    Int       @id @default(autoincrement())
+  vessel_id             Int       @unique
+  shipowner             String?   @db.VarChar(150)
+  shipowner_platform    String?   @db.VarChar(150)
+  charter_type          String?   @db.VarChar(50)
+  charterer_name        String?   @db.VarChar(150)
+  charter_start         DateTime? @db.Date
+  charter_end           DateTime? @db.Date
+  pool_name             String?   @db.VarChar(100)
+  hire_rate             Decimal?  @db.Decimal(12, 2)
+  cost_center           String?   @db.VarChar(50)
+  safety_no             String?   @db.VarChar(100)
+  use_operator_acc      Boolean?  @default(false)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+  vessels               Vessel    @relation(fields: [vessel_id], references: [id], onDelete: Cascade)
+
+  @@index([vessel_id], map: "idx_vessel_commercial_vessel")
+  @@map("vessel_commercial")
+}
+
+model VesselTechnical {
+  id                    Int       @id @default(autoincrement())
+  vessel_id             Int       @unique
+  loa                   Decimal?  @db.Decimal(10, 2)
+  lbp                   Decimal?  @db.Decimal(10, 2)
+  breadth               Decimal?  @db.Decimal(10, 2)
+  depth                 Decimal?  @db.Decimal(10, 2)
+  draft_summer          Decimal?  @db.Decimal(10, 2)
+  draft_winter          Decimal?  @db.Decimal(10, 2)
+  air_draft             Decimal?  @db.Decimal(10, 2)
+  gross_tonnage         Decimal?  @db.Decimal(12, 2)
+  net_tonnage           Decimal?  @db.Decimal(12, 2)
+  deadweight            Decimal?  @db.Decimal(12, 2)
+  lightship_weight      Decimal?  @db.Decimal(12, 2)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+  vessels               Vessel    @relation(fields: [vessel_id], references: [id], onDelete: Cascade)
+
+  @@index([vessel_id], map: "idx_vessel_technical_vessel")
+  @@map("vessel_technical")
+}
+
+model VesselEngine {
+  id                            Int       @id @default(autoincrement())
+  vessel_id                     Int       @unique
+  main_engine_no                String?   @db.VarChar(100)
+  main_engine_maker             String?   @db.VarChar(100)
+  main_engine_model             String?   @db.VarChar(100)
+  engine_type                   String?   @db.VarChar(50)
+  engine_rating                 String?   @db.VarChar(100)
+  mcr_power_kw                  Decimal?  @db.Decimal(12, 2)
+  me_rpm_at_mcr                 Int?
+  rpm                           Int?
+  ncr_rpm                       Int?
+  fuel_type                     String?   @db.VarChar(50)
+  sfoc_max                      Decimal?  @db.Decimal(10, 2)
+  sfoc_min                      Decimal?  @db.Decimal(10, 2)
+  no_of_cylinders               Int?
+  no_of_air_coolers             Int?
+  me_cons_at_sea                Decimal?  @db.Decimal(10, 2)
+  no_of_generators              Int?
+  generator_capacity_kw         Decimal?  @db.Decimal(12, 2)
+  emergency_generator           Boolean?  @default(false)
+  boiler_type                   String?   @db.VarChar(50)
+  boiler_capacity               Decimal?  @db.Decimal(10, 2)
+  lng_fuel_consumer_unit_class  String?   @db.VarChar(100)
+  created_at                    DateTime? @default(now()) @db.Timestamp(6)
+  updated_at                    DateTime? @default(now()) @db.Timestamp(6)
+  vessels                       Vessel    @relation(fields: [vessel_id], references: [id], onDelete: Cascade)
+
+  @@index([vessel_id], map: "idx_vessel_engine_vessel")
+  @@map("vessel_engine")
+}
+
+model VesselPropulsion {
+  id                    Int       @id @default(autoincrement())
+  vessel_id             Int       @unique
+  propellers_no         Int?
+  propeller_type        String?   @db.VarChar(50)
+  propeller_diameter    Decimal?  @db.Decimal(10, 2)
+  propeller_pitch       Decimal?  @db.Decimal(10, 2)
+  no_of_propellers      Int?
+  bollard_pull          Decimal?  @db.Decimal(12, 2)
+  bow_thruster_kw       Decimal?  @db.Decimal(10, 2)
+  stern_thruster_kw     Decimal?  @db.Decimal(10, 2)
+  f_wind                String?   @db.VarChar(50)
+  p_wind                String?   @db.VarChar(50)
+  p_prop                String?   @db.VarChar(50)
+  service_speed         Decimal?  @db.Decimal(5, 2)
+  max_speed             Decimal?  @db.Decimal(5, 2)
+  fuel_consumption_sea  Decimal?  @db.Decimal(10, 2)
+  fuel_consumption_port Decimal?  @db.Decimal(10, 2)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+  vessels               Vessel    @relation(fields: [vessel_id], references: [id], onDelete: Cascade)
+
+  @@index([vessel_id], map: "idx_vessel_propulsion_vessel")
+  @@map("vessel_propulsion")
+}
+
+model VesselTanks {
+  id                    Int       @id @default(autoincrement())
+  vessel_id             Int       @unique
+  cargo_tank_count      Int?
+  cargo_capacity_cbm    Decimal?  @db.Decimal(12, 2)
+  tank_coating_type     String?   @db.VarChar(50)
+  heating_coil          Boolean?  @default(false)
+  hfo_capacity          Decimal?  @db.Decimal(12, 2)
+  mgo_capacity          Decimal?  @db.Decimal(12, 2)
+  lng_capacity          Decimal?  @db.Decimal(12, 2)
+  ballast_capacity      Decimal?  @db.Decimal(12, 2)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+  vessels               Vessel    @relation(fields: [vessel_id], references: [id], onDelete: Cascade)
+
+  @@index([vessel_id], map: "idx_vessel_tanks_vessel")
+  @@map("vessel_tanks")
+}
+
+model VesselCertificate {
+  id                    Int       @id @default(autoincrement())
+  vessel_id             Int
+  certificate_name      String    @db.VarChar(100)
+  issuing_authority     String?   @db.VarChar(100)
+  issue_date            DateTime? @db.Date
+  expiry_date           DateTime? @db.Date
+  status                String?   @db.VarChar(50)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+  vessels               Vessel    @relation(fields: [vessel_id], references: [id], onDelete: Cascade)
+
+  @@index([vessel_id], map: "idx_vessel_certificate_vessel")
+  @@index([expiry_date], map: "idx_vessel_certificate_expiry")
+  @@map("vessel_certificates")
+}
+
+model VesselCrewConfig {
+  id                    Int       @id @default(autoincrement())
+  vessel_id             Int       @unique
+  manning_agent         String?   @db.VarChar(150)
+  crew_capacity         Int?
+  officer_count         Int?
+  rating_count          Int?
+  nationality_mix       String?   @db.VarChar(100)
+  union_type            String?   @db.VarChar(50)
+  payroll_type          String?   @db.VarChar(50)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+  vessels               Vessel    @relation(fields: [vessel_id], references: [id], onDelete: Cascade)
+
+  @@index([vessel_id], map: "idx_vessel_crew_config_vessel")
+  @@map("vessel_crew_config")
+}
+
+model VesselNavigation {
+  id                    Int       @id @default(autoincrement())
+  vessel_id             Int       @unique
+  ais_type              String?   @db.VarChar(50)
+  radar_type            String?   @db.VarChar(50)
+  ecdis_model           String?   @db.VarChar(100)
+  gps_system            String?   @db.VarChar(100)
+  satcom                String?   @db.VarChar(100)
+  vdr                   Boolean?  @default(false)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+  vessels               Vessel    @relation(fields: [vessel_id], references: [id], onDelete: Cascade)
+
+  @@index([vessel_id], map: "idx_vessel_navigation_vessel")
+  @@map("vessel_navigation")
+}
+
+model VesselEnvironment {
+  id                    Int       @id @default(autoincrement())
+  vessel_id             Int       @unique
+  bwts                  Boolean?  @default(false)
+  scrubber              Boolean?  @default(false)
+  eexi_rating           String?   @db.VarChar(20)
+  cii_rating            String?   @db.VarChar(20)
+  emission_tier         String?   @db.VarChar(20)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+  vessels               Vessel    @relation(fields: [vessel_id], references: [id], onDelete: Cascade)
+
+  @@index([vessel_id], map: "idx_vessel_environment_vessel")
+  @@map("vessel_environment")
+}
+
+model VesselMaintenance {
+  id                    Int       @id @default(autoincrement())
+  vessel_id             Int       @unique
+  pms_system_id         String?   @db.VarChar(50)
+  last_dry_dock         DateTime? @db.Date
+  next_dry_dock         DateTime? @db.Date
+  last_survey           DateTime? @db.Date
+  next_survey           DateTime? @db.Date
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+  vessels               Vessel    @relation(fields: [vessel_id], references: [id], onDelete: Cascade)
+
+  @@index([vessel_id], map: "idx_vessel_maintenance_vessel")
+  @@map("vessel_maintenance")
+}
+
+model VesselClearDeck {
+  id                    Int       @id @default(autoincrement())
+  vessel_id             Int       @unique
+  clear_deck_length     Decimal?  @db.Decimal(10, 2)
+  clear_deck_breadth    Decimal?  @db.Decimal(10, 2)
+  clear_deck_area       Decimal?  @db.Decimal(12, 2)
+  clear_deck_strength   Decimal?  @db.Decimal(10, 2)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+  vessels               Vessel    @relation(fields: [vessel_id], references: [id], onDelete: Cascade)
+
+  @@index([vessel_id], map: "idx_vessel_clear_deck_vessel")
+  @@map("vessel_clear_deck")
+}
+
+model VesselSteeringGear {
+  id                    Int       @id @default(autoincrement())
+  vessel_id             Int       @unique
+  rudders_no            Int?
+  rudders_type          String?   @db.VarChar(100)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+  vessels               Vessel    @relation(fields: [vessel_id], references: [id], onDelete: Cascade)
+
+  @@index([vessel_id], map: "idx_vessel_steering_gear_vessel")
+  @@map("vessel_steering_gear")
+}
+
+model VesselSideThusters {
+  id                    Int       @id @default(autoincrement())
+  vessel_id             Int       @unique
+  bow_thruster_no       Int?
+  stern_thruster_no     Int?
+  bow_thruster_rating   Decimal?  @db.Decimal(10, 2)
+  stern_thruster_rating Decimal?  @db.Decimal(10, 2)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+  vessels               Vessel    @relation(fields: [vessel_id], references: [id], onDelete: Cascade)
+
+  @@index([vessel_id], map: "idx_vessel_side_thrusters_vessel")
+  @@map("vessel_side_thrusters")
+}
+
+model VesselGeneralDetails {
+  id                        Int       @id @default(autoincrement())
+  vessel_id                 Int       @unique
+  code                      String?   @db.VarChar(50)
+  name                      String?   @db.VarChar(150)
+  short_name                String?   @db.VarChar(100)
+  x_name_1                  String?   @db.VarChar(150)
+  x_name_2                  String?   @db.VarChar(150)
+  type                      String?   @db.VarChar(100)
+  prefix                    String?   @db.VarChar(50)
+  initials                  String?   @db.VarChar(50)
+  sorting                   String?   @db.VarChar(100)
+  fleet                     String?   @db.VarChar(100)
+  vessel_type_2             String?   @db.VarChar(100)
+  vessel_group              String?   @db.VarChar(100)
+  wage_scale                String?   @db.VarChar(100)
+  vessel_class              String?   @db.VarChar(100)
+  show_on_scheduling        Boolean?  @default(false)
+  active_for_chartering     Boolean?  @default(false)
+  virtual                   Boolean?  @default(false)
+  own                       Boolean?  @default(false)
+  shuttle_tanker            Boolean?  @default(false)
+  active                    Boolean?  @default(true)
+  reason                    String?   @db.VarChar(100)
+  valid_until               DateTime? @db.Date
+  date_in_fleet             DateTime? @db.Date
+  hull_machinery            String?   @db.VarChar(100)
+  fd_d                      String?   @db.VarChar(100)
+  p_i                       String?   @db.VarChar(100)
+  fleet_vessel_ident        String?   @db.VarChar(100)
+  lead_vessel_id            String?   @db.VarChar(100)
+  shipping_name             String?   @db.VarChar(150)
+  created_at                DateTime? @default(now()) @db.Timestamp(6)
+  updated_at                DateTime? @default(now()) @db.Timestamp(6)
+  vessels                   Vessel    @relation(fields: [vessel_id], references: [id], onDelete: Cascade)
+
+  @@index([vessel_id], map: "idx_vessel_general_details_vessel")
+  @@map("vessel_general_details")
 }

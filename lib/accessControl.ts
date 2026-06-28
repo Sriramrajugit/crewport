@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getSession } from '@/lib/session';
 
 /**
  * Validate that the user has access to the requested vessel
@@ -41,7 +42,6 @@ export async function validateVesselAccess(
 
         return { allowed: true };
     } catch (error) {
-        console.error('Error validating vessel access:', error);
         return { allowed: false, error: 'Server error while validating access' };
     }
 }
@@ -62,13 +62,26 @@ export function getVesselIdFromRequest(request: NextRequest): number | null {
 }
 
 /**
- * Extract user ID from request (from session/auth)
- * This is a placeholder - replace with actual auth mechanism
+ * Extract user ID from request (from iron-session)
  */
-export function getUserIdFromRequest(request: NextRequest): number | null {
-    // TODO: Implement actual session/JWT parsing
-    // For now, return mock user ID
-    return 1;
+export async function getUserIdFromRequest(request: NextRequest): Promise<number | null> {
+    try {
+        console.log(`[Auth] getUserIdFromRequest called`);
+        const session = await getSession();
+        
+        console.log(`[Auth] Session data: userId=${session.userId}, email=${session.email}, isLoggedIn=${session.isLoggedIn}`);
+        
+        if (session.userId && session.isLoggedIn) {
+            console.log(`[Auth] User authenticated via session: ${session.email} (ID: ${session.userId})`);
+            return session.userId;
+        }
+    } catch (error) {
+        console.error('[Auth] Error reading session:', error);
+    }
+    
+    // No valid session - return null
+    console.log(`[Auth] No valid session found - returning null`);
+    return null;
 }
 
 /**
@@ -88,7 +101,6 @@ export async function isUserAdmin(userId: number): Promise<boolean> {
         const role = user.users_roles?.role_name || '';
         return role === 'ADMIN' || role === 'SUPER_ADMIN';
     } catch (error) {
-        console.error('Error checking admin role:', error);
         return false;
     }
 }
@@ -108,7 +120,7 @@ export async function withAdminAccess(
     handler: (userId: number) => Promise<NextResponse>
 ) {
     try {
-        const userId = getUserIdFromRequest(request);
+        const userId = await getUserIdFromRequest(request);
 
         if (!userId) {
             return NextResponse.json(
@@ -129,7 +141,6 @@ export async function withAdminAccess(
         // Call handler with validated user ID
         return await handler(userId);
     } catch (error) {
-        console.error('Error in withAdminAccess:', error);
         return NextResponse.json(
             { error: 'Internal server error' },
             { status: 500 }
@@ -152,7 +163,7 @@ export async function withVesselAccess(
     handler: (vesselId: number, userId: number) => Promise<NextResponse>
 ) {
     try {
-        const userId = getUserIdFromRequest(request);
+        const userId = await getUserIdFromRequest(request);
         const vesselId = getVesselIdFromRequest(request);
 
         if (!userId) {
@@ -181,7 +192,6 @@ export async function withVesselAccess(
         // Call handler with validated vessel ID and user ID
         return await handler(vesselId, userId);
     } catch (error) {
-        console.error('Error in withVesselAccess:', error);
         return NextResponse.json(
             { error: 'Internal server error' },
             { status: 500 }
